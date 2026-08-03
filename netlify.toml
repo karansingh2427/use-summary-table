@@ -1,0 +1,7 @@
+# Netlify configuration
+# Deploys the app/ folder as the site root.
+# Connect this repo in the Netlify dashboard and it will use these settings automatically.
+
+[build]
+  publish = "app"
+  # No build command — the app is static HTML/JS/CSS

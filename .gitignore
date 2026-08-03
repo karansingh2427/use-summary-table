@@ -1,0 +1,11 @@
+# Ignore macOS metadata
+.DS_Store
+**/.DS_Store
+
+# Ignore any accidentally downloaded test files outside samples/
+*.pdf
+!samples/*.pdf
+
+# Editor directories
+.vscode/
+.idea/

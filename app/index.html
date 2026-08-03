@@ -1,0 +1,3451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Use Summary Tables Extractor</title>
+<script src="vendor/pdf.min.js"></script>
+<script src="vendor/xlsx.bundle.js"></script>
+<!-- OCR fallback for scanned labels. Place tesseract.min.js in app/vendor/ to run fully offline. -->
+<script src="vendor/tesseract.min.js" onerror="window.__tesseractLocalMissing = true"></script>
+<style>
+  :root {
+    --bg: #f5f7fa;
+    --panel: #ffffff;
+    --ink: #14213d;
+    --muted: #667085;
+    --line: #e4e8ee;
+    --brand: #1f6feb;
+    --brand-dark: #1550b3;
+    --ok: #067647;
+    --ok-bg: #ecfdf3;
+    --shadow: 0 1px 2px rgba(16,24,40,.05), 0 8px 24px rgba(16,24,40,.06);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  header.hero {
+    background: linear-gradient(135deg, #14213d 0%, #1f3a68 100%);
+    color: #fff;
+    padding: 48px 24px;
+  }
+  header.hero .inner { max-width: 1100px; margin: 0 auto; }
+  .badge {
+    display: inline-block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+    background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
+    padding: 4px 10px; border-radius: 999px; margin-bottom: 14px;
+  }
+  header.hero h1 { margin: 0 0 10px; font-size: 34px; letter-spacing: -.02em; }
+  header.hero p { margin: 0; max-width: 720px; color: #c9d6ea; font-size: 16px; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: var(--shadow); padding: 24px; margin-top: 24px;
+  }
+  .card h2 { margin: 0 0 4px; font-size: 18px; }
+  .card .sub { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+
+  .drop {
+    border: 2px dashed #c3cede; border-radius: 12px; background: #fbfcfe;
+    padding: 36px 20px; text-align: center; cursor: pointer; transition: .18s;
+  }
+  .drop:hover, .drop.over { border-color: var(--brand); background: #f2f7ff; }
+  .drop:focus-visible { outline: 3px solid var(--brand); outline-offset: 3px; }
+  /* Visually hidden but still read by screen readers. */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  .drop .icon { font-size: 30px; }
+  .drop strong { display: block; margin-top: 8px; }
+  .drop span { color: var(--muted); font-size: 14px; }
+
+  ul.files { list-style: none; margin: 16px 0 0; padding: 0; }
+  ul.files li {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 8px;
+    font-size: 14px; background: #fff;
+  }
+  ul.files .meta { color: var(--muted); font-size: 12px; }
+
+  /* N4 — secondary buttons may look small, but the tap area must not be.
+     Padding alone shrank "Remove" to ~26px tall; min-height enforces the
+     44px floor while keeping the compact type size. */
+  button.small-target {
+    font-size: 13px; padding: 4px 12px;
+    min-height: 44px; min-width: 44px;
+  }
+  /* The expander is a single glyph in a narrow column, so it earns its
+     target from an invisible padded hit area rather than a wider column. */
+  td.toggle { min-width: 44px; height: 44px; }
+
+  .actions { display: flex; gap: 12px; align-items: center; margin-top: 20px; flex-wrap: wrap; }
+  button {
+    font: inherit; font-weight: 600; border-radius: 10px; padding: 11px 20px;
+    border: 1px solid transparent; cursor: pointer; transition: .15s;
+  }
+  .primary { background: var(--brand); color: #fff; }
+  .primary:hover:not(:disabled) { background: var(--brand-dark); }
+  .ghost { background: #fff; color: var(--ink); border-color: var(--line); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  .status { font-size: 14px; color: var(--muted); }
+  .bar { height: 6px; background: #e9edf4; border-radius: 999px; overflow: hidden; margin-top: 16px; display: none; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--brand); transition: width .25s; }
+
+  .notice {
+    display: none; align-items: flex-start; gap: 10px; margin-top: 18px;
+    background: var(--ok-bg); border: 1px solid #abefc6; color: var(--ok);
+    border-radius: 10px; padding: 12px 14px; font-size: 14px;
+  }
+  /* N3 — problems are reported in the same panel as successes, so the user
+     never has to dismiss a blocking dialog to see what went wrong. */
+  .notice.error { background: #fef3f2; border-color: #fecdca; color: #b42318; }
+    .notice.warn { background: #fffaeb; border-color: #fedf89; color: #7a2e0e; }
+  .test-mode-banner {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(920px, calc(100% - 24px));
+    z-index: 1000;
+    box-shadow: 0 10px 24px rgba(122, 46, 14, .16);
+  }
+
+  .qc-defects {
+    display: none;
+    margin-top: 10px;
+    border: 1px solid #fecdca;
+    background: #fff7f6;
+    color: #7a271a;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+  }
+  .qc-defects h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  .qc-defects ul { margin: 0; padding-left: 18px; }
+  .qc-defects li { margin-bottom: 4px; }
+
+  .review-gate {
+    display: none;
+    margin-top: 12px;
+    border: 1px solid #bfd4ff;
+    background: #f5f9ff;
+    color: #143b7a;
+    border-radius: 10px;
+    padding: 14px;
+    font-size: 13px;
+  }
+  .review-gate h4 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .review-gate .stage-title { margin: 0 0 6px; font-size: 15px; color: #1f2a44; }
+  .review-gate .stage-text { margin: 0 0 10px; color: #33415c; }
+  .review-gate .stage-body { display: grid; gap: 8px; margin-bottom: 10px; }
+  .review-gate .mini-card {
+    border: 1px solid #dbe4f3;
+    background: #fff;
+    border-radius: 8px;
+    padding: 9px 10px;
+  }
+  .review-gate .mini-card .meta {
+    color: #667085;
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+  .review-grid {
+    overflow: auto;
+    border: 1px solid #dbe4f3;
+    border-radius: 8px;
+    background: #fff;
+  }
+  .review-grid table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  .review-grid th,
+  .review-grid td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #e8eef8;
+    vertical-align: top;
+    text-align: left;
+  }
+  .review-grid th {
+    background: #eef4ff;
+    color: #28437a;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    white-space: nowrap;
+  }
+  .review-grid td code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+  .risk-grid {
+    overflow: auto;
+    border: 1px solid #dbe4f3;
+    border-radius: 8px;
+    background: #fff;
+  }
+  .risk-grid table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .risk-grid th,
+  .risk-grid td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #e8eef8;
+    vertical-align: top;
+    text-align: left;
+    line-height: 1.3;
+  }
+  .risk-grid th {
+    background: #eef4ff;
+    color: #28437a;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    white-space: nowrap;
+  }
+  .review-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .review-note { margin: 8px 0 0; color: #475467; font-size: 12.5px; }
+  footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 32px; }
+
+  .schema-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-size: 12px; background: #f1f5fb; border: 1px solid var(--line);
+    color: #33415c; padding: 5px 10px; border-radius: 8px;
+  }
+
+  .log {
+    display: none; margin-top: 18px; background: #0f172a; color: #cbd5e1;
+    border-radius: 10px; padding: 14px 16px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px; max-height: 260px; overflow: auto; white-space: pre-wrap;
+  }
+
+  .search:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(31,111,235,.12); }
+
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+  .stat {
+    background: #f7f9fc; border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 16px; min-width: 110px;
+  }
+  .stat b { display: block; font-size: 20px; letter-spacing: -.02em; }
+  .stat span { font-size: 12px; color: var(--muted); }
+
+  .group { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 18px; overflow: hidden; }
+  .group > .head {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    background: #f7f9fc; padding: 9px 12px; border-bottom: 1px solid var(--line);
+    font-size: 13px; font-weight: 600;
+  }
+  .group > .head .count { font-weight: 500; color: var(--muted); font-size: 12px; }
+  .scroll { max-height: 460px; overflow: auto; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  thead th {
+    position: sticky; top: 0; z-index: 1; background: #eef2f8; text-align: left;
+    padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap;
+    font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #43506b;
+  }
+  tbody td {
+    padding: 6px 10px; border-bottom: 1px solid #eef1f6; vertical-align: top;
+    max-width: 280px; word-break: break-word;
+    line-height: 1.35;
+  }
+  /* 27-column schema: long restriction/PPE cells are clamped until hovered,
+     so the table stays scannable without losing any content. */
+  tbody td.long { max-width: 320px; }
+  tbody td .cell-box { display: block; }
+  tbody td.long .cell-box { max-height: 4.2em; overflow: hidden; }
+  tbody tr:nth-child(even) { background: #fbfcfe; }
+  tbody tr:hover { background: #f2f7ff; }
+  td.na { color: #98a2b3; font-style: italic; }
+  td.crop { font-weight: 600; min-width: 180px; }
+  mark { background: #fff3bf; padding: 0 1px; border-radius: 2px; }
+  .empty { padding: 20px; text-align: center; color: var(--muted); font-size: 14px; }
+  #results { display: none; }
+
+  /* ---- Phase 2: confidence, source, warnings, runs ---- */
+  .select {
+    font: inherit; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 10px; background: #fff; color: var(--ink);
+  }
+  .hint { font-size: 12.5px; color: var(--muted); margin: 0 0 14px; }
+
+  .conf { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .conf.High   { background: #ecfdf3; color: #067647; border: 1px solid #abefc6; }
+  .conf.Medium { background: #fffaeb; color: #b54708; border: 1px solid #fedf89; }
+  .conf.Low    { background: #fef3f2; color: #b42318; border: 1px solid #fecdca; }
+  tr.low td { background: #fffbfa; }
+
+  .warnings { display: none; margin-bottom: 14px; border-radius: 10px; padding: 10px 12px;
+    background: #fffaeb; border: 1px solid #fedf89; color: #93370d; font-size: 13.5px; }
+  .warnings h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .warnings ul { margin: 0; padding-left: 18px; }
+  .warnings li { margin-bottom: 2px; }
+
+  td.toggle { width: 26px; text-align: center; }
+  .toggle-btn {
+    font: inherit; color: var(--muted); background: transparent; border: 0;
+    cursor: pointer; min-width: 36px; min-height: 36px; padding: 0;
+  }
+  .toggle-btn:focus-visible {
+    outline: 2px solid var(--brand); outline-offset: 1px; border-radius: 8px;
+  }
+  tr.source-row td {
+    background: #f7f9fc; font-size: 12px; color: #43506b; padding: 7px 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.45;
+  }
+  .legend-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid #f1d39a;
+    background: #fffaf0;
+    border-radius: 999px;
+    font-size: 12px;
+    color: #6b4f11;
+  }
+  td[contenteditable="true"]:focus {
+    outline: 2px solid var(--brand); outline-offset: -2px; background: #fff;
+  }
+  td.edited { background: #eff8ff !important; box-shadow: inset 3px 0 0 var(--brand); }
+  /* R24 — filled by a convention rule, not read verbatim from the label. */
+  td.derived { background: #fffaf0 !important; box-shadow: inset 3px 0 0 #d9910d; }
+  td.derived::after { content: " ◆"; color: #d9910d; font-size: 10px; vertical-align: super; }
+
+  thead th.sortable { cursor: pointer; user-select: none; }
+  thead th.sortable:hover { background: #e3eaf5; }
+  thead th .arrow { opacity: .45; margin-left: 4px; font-size: 10px; }
+
+  @media (max-width: 900px) {
+    .hero .inner { padding: 34px 18px 42px; }
+    .wrap { padding: 20px 14px 30px; }
+    .card { padding: 18px 14px; }
+    .scroll { max-height: 58vh; }
+    tbody td, thead th { padding-left: 7px; padding-right: 7px; }
+  }
+
+  @media (max-width: 640px) {
+    .hero h1 { font-size: 30px; }
+    .actions { gap: 8px; }
+    button { width: 100%; }
+    .toolbar { gap: 8px; }
+    .search { min-width: 100%; }
+    .select { width: 100%; }
+    .group > .head { align-items: flex-start; flex-direction: column; }
+    table { font-size: 12px; }
+  }
+
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="inner">
+    <div class="badge">Prototype · Data Extractor</div>
+    <h1>Use Summary Tables Extractor</h1>
+    <p>
+      Upload one or more pesticide label PDFs. The extractor reads the entire document and pulls out
+      <strong>every crop and every use</strong> into one complete, schema-compliant Use Summary Table —
+      rendered on screen and available as a downloadable Excel (.xlsx) file.
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- Step 1: Upload -->
+  <section class="card">
+    <h2>1 · Upload label PDFs</h2>
+    <p class="sub">Drag and drop files below, or click to browse. Multiple PDFs are supported.</p>
+
+    <div class="drop" id="drop" role="button" tabindex="0"
+         aria-controls="fileList"
+         aria-label="Choose PDF label files. Press Enter or Space to open the file browser, or drop files here.">
+      <div class="icon" aria-hidden="true">📄</div>
+      <strong>Drop PDF label files here</strong>
+      <span>or click to select files from your computer</span>
+    </div>
+    <input type="file" id="fileInput" accept="application/pdf" multiple hidden
+           tabindex="-1" aria-hidden="true" />
+
+    <ul class="files" id="fileList" aria-label="Selected files"></ul>
+
+    <div class="actions">
+      <button class="primary" id="runBtn" disabled>Run Extraction</button>
+      <button class="ghost" id="clearBtn" disabled>Clear</button>
+      <span class="status" id="status" role="status" aria-live="polite">No files selected.</span>
+    </div>
+
+    <div class="bar" id="bar" role="progressbar" aria-label="Extraction progress"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
+    <div class="notice" id="notice" role="status" aria-live="polite"><span id="noticeIcon" aria-hidden="true">✔</span><span id="noticeText"></span></div>
+        <div class="notice warn test-mode-banner" id="testModeBanner" role="status" aria-live="polite"><span aria-hidden="true">!</span><span>Testing mode is enabled: forceQcFail=1 will force a QC block until you remove this URL flag.</span></div>
+
+    <!-- R19 — when a label lists more than one active ingredient, the rate
+         conversion is ambiguous, so the analyst must choose. -->
+    <div class="notice" id="aiPicker" role="group" aria-label="Active ingredient choice" style="display:none;align-items:flex-start;flex-direction:column;gap:8px">
+      <strong>This label lists more than one active ingredient.</strong>
+      <span class="sub" id="aiPickerText"></span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label for="aiSelect">Report results for:</label>
+        <select id="aiSelect"></select>
+        <button class="primary" id="aiConfirmBtn">Confirm and continue</button>
+      </div>
+    </div>
+
+    <pre class="log" id="log" role="log" aria-live="polite" aria-label="Extraction run log" tabindex="0"></pre>
+  </section>
+
+  <!-- Step 2: Schema -->
+  <section class="card">
+    <h2>2 · Output schema</h2>
+    <p class="sub">Every extracted row conforms to these 27 columns, in this exact order. Values the label does not state are written as <b>NS</b>; columns that do not apply read <b>NA</b> — never left blank.</p>
+    <div class="schema-grid" id="schemaGrid"></div>
+  </section>
+
+  <!-- Step 3: Results placeholder -->
+  <section class="card">
+    <h2>3 · Use Summary Table &amp; Excel export</h2>
+    <p class="sub">
+      The complete table appears here with all crops and all uses — no omissions — grouped by source
+      file, searchable, and exportable with one click as a schema-verified <strong>.xlsx</strong> file.
+    </p>
+    <div class="notice" id="qcGate" role="status" aria-live="polite"><span id="qcGateIcon" aria-hidden="true">🛡</span><span id="qcGateText"></span></div>
+    <div class="qc-defects" id="qcDefects" role="region" aria-label="QC gate defects"></div>
+    <div class="review-gate" id="reviewGate" role="region" aria-label="Pre-finalization review stations">
+      <h4>Review stations</h4>
+      <p class="stage-title" id="reviewStageTitle"></p>
+      <p class="stage-text" id="reviewStageText"></p>
+      <div class="stage-body" id="reviewStageBody"></div>
+      <div class="review-actions">
+        <button class="primary" id="reviewYesBtn" type="button">Yes, continue</button>
+        <button class="ghost" id="reviewNoBtn" type="button">No, pause for review</button>
+        <button class="ghost" id="reviewResumeBtn" type="button" style="display:none">Resume station check</button>
+        <button class="ghost" id="reviewRerunBtn" type="button" style="display:none">Re-run extraction</button>
+      </div>
+      <p class="review-note" id="reviewGateNote"></p>
+    </div>
+    <div id="jumpBackWrap" style="display:none;margin-top:10px">
+      <button class="ghost" id="jumpBackBtn" type="button">Back to review station</button>
+    </div>
+    <div class="status" id="resultsPlaceholder" role="status">Results will appear here once extraction has run.</div>
+
+    <div id="results">
+      <div class="stats" id="stats"></div>
+      <div class="warnings" id="warnings" role="region" aria-label="Coverage warnings"></div>
+      <div class="toolbar">
+        <input class="search" id="search" type="search" aria-label="Search extracted rows" placeholder="Search crops, uses, rates, notes…" />
+        <select class="select" id="confFilter" aria-label="Filter by confidence" title="Filter by confidence">
+          <option value="">All confidence</option>
+          <option value="High">High only</option>
+          <option value="Medium">Medium only</option>
+          <option value="Low">Low only</option>
+        </select>
+        <button class="primary" id="downloadBtn">⬇ Excel (.xlsx)</button>
+        <span class="legend-inline" title="Cells marked ◆ were filled by a documented convention rule rather than copied word-for-word from the label."><b style="color:#d9910d">◆</b> Derived value</span>
+      </div>
+      <p class="hint">Double-click any cell to correct it · click a row's <b>▸</b> to see the source text it came from</p>
+      <p class="hint">Cells marked <b style="color:#d9910d">◆</b> were filled by a documented convention rule rather than copied word-for-word from the label. Hover the cell to see which rule fired, or open <code>knowledge/derivation-rules.md</code>.</p>
+      <div id="groups"></div>
+    </div>
+  </section>
+
+  <footer>Use Summary Tables Extractor · prototype build</footer>
+</main>
+
+<script>
+/* ------------------------------------------------------------------
+   TASK 2 — Use Summary Table schema (single source of truth)
+   Column order and names follow knowledge/UST_definitions.txt and the
+   golden examples in knowledge/golden-examples/. Do not reorder.
+------------------------------------------------------------------ */
+const SCHEMA = [
+  // Product
+  "Reg. #/File Sym",
+  "Physical Form",
+  "Product Name (PBN)",
+  // Site
+  "Use",
+  "Use Site",
+  // Application method
+  "App. Target",
+  "App. Type",
+  "App. Equipment",
+  "App. Timing (Site Status)",
+  "App. Timing (other)",
+  // Rate pattern
+  "App Rate (lb ai/A)",
+  "A.I. Max Single Rate/App. (lb a.i./A)",
+  "Max # Apps/C.C.",
+  "A.I. Max Total Rate/C.C. (lb a.i./A)",
+  "Max # Apps/Yr.",
+  "A.I. Max Total Rate/Yr. (lb a.i./A)",
+  "MRI (days)",
+  "REI",
+  "PHI (days)",
+  "PPE",
+  "Additional Information",
+  "Max No. of CC/yr",
+  // Restrictions
+  "Geographic Restrictions",
+  "Drift Restrictions",
+  "Soil Restrictions",
+  "On-field Non-target Species Restrictions",
+  "Additional Restrictions for Use/Use Site"
+];
+
+/** Label is silent on this value. Never inferred or defaulted (R19). */
+const NOT_SPECIFIED = "NS";
+/** Column does not apply to this use. */
+const NOT_APPLICABLE = "NA";
+
+// Metadata columns — tracked per row but not part of the exported schema body.
+// "Source File" identifies the label; "Page" (R12) and "Confidence" (R11) aid review.
+const META_COLUMNS = ["Source File", "Page", "Confidence"];
+
+/** Columns shown in the on-screen table and written to exports. */
+const DISPLAY_COLUMNS = ["Page", "Confidence", ...SCHEMA];
+
+/** Free-text columns that can run long — clamped in the UI until hovered. */
+const LONG_COLUMNS = new Set([
+  "PPE",
+  "Additional Information",
+  "App. Equipment",
+  "App. Timing (other)",
+  "Geographic Restrictions",
+  "Drift Restrictions",
+  "Soil Restrictions",
+  "On-field Non-target Species Restrictions",
+  "Additional Restrictions for Use/Use Site"
+]);
+
+/** Returns a blank schema-compliant row with every field filled. */
+function blankRow() {
+  const row = {};
+  SCHEMA.forEach(col => { row[col] = NOT_SPECIFIED; });
+  return row;
+}
+
+/** Verifies a row has exactly the schema keys, in order, with no empty values. */
+function isSchemaCompliant(row) {
+  const keys = Object.keys(row);
+  if (keys.length !== SCHEMA.length) return false;
+  return SCHEMA.every((col, i) => keys[i] === col && String(row[col] ?? "").trim() !== "");
+}
+
+// Render schema chips
+document.getElementById("schemaGrid").innerHTML =
+  SCHEMA.map(c => `<span class="chip">${c}</span>`).join("");
+
+/* ------------------------------------------------------------------
+   TASK 1 — Upload UI + Run button
+------------------------------------------------------------------ */
+pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
+
+const drop     = document.getElementById("drop");
+const input    = document.getElementById("fileInput");
+const listEl   = document.getElementById("fileList");
+const runBtn   = document.getElementById("runBtn");
+const clearBtn = document.getElementById("clearBtn");
+const statusEl = document.getElementById("status");
+const barEl    = document.getElementById("bar");
+const barFill  = barEl.querySelector("i");
+const noticeEl = document.getElementById("notice");
+const noticeTx = document.getElementById("noticeText");
+const noticeIc = document.getElementById("noticeIcon");
+const testModeBannerEl = document.getElementById("testModeBanner");
+const FORCE_QC_FAIL = new URLSearchParams(window.location.search).get("forceQcFail") === "1";
+
+// N3 — every message, good or bad, goes through the one notice panel.
+// alert() blocked the page, looked nothing like the rest of the app, and
+// could not be read back by the aria-live region the panel already has.
+function showNotice(text, kind = "ok") {
+  noticeTx.textContent = text;
+  noticeIc.textContent = kind === "error" ? "⚠" : "✔";
+  noticeEl.classList.toggle("error", kind === "error");
+  noticeEl.style.display = "flex";
+}
+
+function renderTestModeBanner() {
+  testModeBannerEl.style.display = FORCE_QC_FAIL ? "flex" : "none";
+}
+
+renderTestModeBanner();
+
+// R19 — active-ingredient confirmation
+const aiPicker     = document.getElementById("aiPicker");
+const aiPickerText = document.getElementById("aiPickerText");
+const aiSelect     = document.getElementById("aiSelect");
+const aiConfirmBtn = document.getElementById("aiConfirmBtn");
+let pendingRun = null;   // run parked awaiting the analyst's choice
+const logEl    = document.getElementById("log");
+
+let files = [];
+
+// M1 — keep the visual bar and its assistive-tech value in step.
+function setProgress(pct) {
+  const v = Math.max(0, Math.min(100, Math.round(pct)));
+  barFill.style.width = `${v}%`;
+  barEl.setAttribute("aria-valuenow", String(v));
+}
+
+drop.addEventListener("click", () => input.click());
+// M2 — the drop zone is a div, so it needs explicit keyboard activation to
+// match the native button behaviour its role="button" advertises.
+drop.addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+    e.preventDefault();
+    input.click();
+  }
+});
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => {
+  e.preventDefault();
+  drop.classList.remove("over");
+  addFiles([...e.dataTransfer.files]);
+});
+input.addEventListener("change", e => addFiles([...e.target.files]));
+clearBtn.addEventListener("click", () => {
+  files = []; input.value = "";
+  aiPicker.style.display = "none";
+  pendingRun = null;
+  render();
+});
+
+function addFiles(incoming) {
+  const pdfs = incoming.filter(f => f.type === "application/pdf" || /\.pdf$/i.test(f.name));
+  pdfs.forEach(f => {
+    if (!files.some(x => x.name === f.name && x.size === f.size)) files.push(f);
+  });
+  render();
+}
+
+function removeFile(i) { files.splice(i, 1); render(); }
+
+// N2 — delegated, so the markup carries no behaviour and the list can be
+// re-rendered freely without rebinding. The index lives in a data attribute.
+listEl.addEventListener("click", e => {
+  const btn = e.target.closest("button[data-remove]");
+  if (btn) removeFile(Number(btn.dataset.remove));
+});
+
+function render() {
+  clearReviewFlow();
+  listEl.innerHTML = files.map((f, i) => `
+    <li>
+      <span aria-hidden="true">📄</span>
+      <span><strong>${esc(f.name)}</strong> <span class="meta">${(f.size/1024/1024).toFixed(2)} MB</span></span>
+      <button class="ghost small-target" data-remove="${i}"
+              aria-label="Remove ${esc(f.name)} from the list">Remove</button>
+    </li>`).join("");
+  runBtn.disabled = clearBtn.disabled = files.length === 0;
+  statusEl.textContent = files.length
+    ? `${files.length} file${files.length > 1 ? "s" : ""} ready.`
+    : "No files selected.";
+  noticeEl.style.display = "none";
+  qcGateEl.style.display = "none";
+  qcGateEl.classList.remove("error");
+  qcGateTextEl.textContent = "";
+  qcDefectsEl.style.display = "none";
+  qcDefectsEl.innerHTML = "";
+  resultsEl.style.display = "none";
+  placeholderEl.style.display = "block";
+  placeholderEl.textContent = "Results will appear here once extraction has run.";
+}
+
+/* ------------------------------------------------------------------
+   TASK 3 — Read full PDF text with PDF.js (every page, every file)
+------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   TASK 17 (R15) — OCR fallback for scanned pages
+   Uses Tesseract.js bundled locally in app/vendor/ (no external API).
+   If the bundle is absent the app degrades gracefully: pages without a
+   text layer are reported as such rather than failing.
+------------------------------------------------------------------ */
+const OCR_AVAILABLE = () => typeof Tesseract !== "undefined";
+let ocrWorker = null;
+
+async function getOcrWorker() {
+  if (ocrWorker) return ocrWorker;
+  ocrWorker = await Tesseract.createWorker("eng");
+  return ocrWorker;
+}
+
+/** Renders a PDF page to canvas and reads it with OCR. */
+async function ocrPage(page) {
+  const viewport = page.getViewport({ scale: 2 });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+  const worker = await getOcrWorker();
+  const { data } = await worker.recognize(canvas);
+  return (data.text || "").replace(/\s+/g, " ").trim();
+}
+
+async function extractPdfText(file, onProgress) {
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const pages = [];
+  let ocrPages = 0;
+
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    let text = content.items.map(it => it.str).join(" ").replace(/\s+/g, " ").trim();
+
+    // No usable text layer → this is a scanned page, try OCR
+    if (text.length < 20) {
+      if (OCR_AVAILABLE()) {
+        onProgress?.(`   ⟳ page ${p} has no text layer — running OCR…`);
+        try {
+          text = await ocrPage(page);
+          if (text) ocrPages++;
+        } catch (err) {
+          onProgress?.(`   ✖ OCR failed on page ${p}: ${err.message}`);
+        }
+      } else {
+        onProgress?.(`   ⚠ page ${p} has no text layer and OCR is unavailable (add app/vendor/tesseract.min.js)`);
+      }
+    }
+    pages.push(text);
+  }
+
+  return { fileName: file.name, numPages: pdf.numPages, pages, ocrPages, fullText: pages.join("\n\n") };
+}
+
+/* ------------------------------------------------------------------
+   TASK 4 — Parse crops and uses into schema-compliant rows
+   Strategy: locate every crop mention in the full document text,
+   slice the text between consecutive crop mentions into "use blocks",
+   then pull each schema field out of its block with targeted patterns.
+------------------------------------------------------------------ */
+
+// Crop vocabulary used to detect crop mentions anywhere in the label.
+// Includes individual crops plus EPA crop groups and subgroups (40 CFR 180.41).
+const CROP_TERMS = [
+  // --- Field & forage crops ---
+  "Alfalfa","Barley","Buckwheat","Canola","Clover","Corn","Cotton","Field Corn","Flax","Forage",
+  "Grain Sorghum","Guar","Hay","Hemp","Jojoba","Kenaf","Lespedeza","Millet","Milo","Oat","Pasture",
+  "Peanut","Popcorn","Rangeland","Rapeseed","Rice","Rye","Safflower","Sesame","Sorghum","Soybean",
+  "Sugar Beet","Sugarcane","Sunflower","Sweet Corn","Timothy","Tobacco","Triticale","Vetch","Wheat",
+  "Wild Rice",
+  // --- Pome & stone fruit ---
+  "Apple","Apricot","Cherry","Crabapple","Loquat","Nectarine","Peach","Pear","Plum","Plumcot",
+  "Prune","Quince",
+  // --- Citrus ---
+  "Calamondin","Citrus","Citron","Grapefruit","Kumquat","Lemon","Lime","Mandarin","Orange","Pummelo",
+  "Satsuma","Tangelo","Tangerine",
+  // --- Berries & small fruit ---
+  "Blackberry","Blueberry","Boysenberry","Cranberry","Currant","Dewberry","Elderberry","Gooseberry",
+  "Grape","Huckleberry","Loganberry","Marionberry","Mulberry","Raspberry","Strawberry",
+  // --- Tree nuts ---
+  "Almond","Beechnut","Brazil Nut","Butternut","Cashew","Chestnut","Filbert","Hazelnut","Hickory Nut",
+  "Macadamia","Pecan","Pine Nut","Pistachio","Walnut",
+  // --- Tropical & subtropical ---
+  "Acerola","Atemoya","Avocado","Banana","Carambola","Cherimoya","Coconut","Coffee","Date","Feijoa",
+  "Fig","Guava","Jackfruit","Kiwifruit","Longan","Lychee","Mango","Olive","Papaya","Passionfruit",
+  "Persimmon","Pineapple","Plantain","Pomegranate","Sapote","Starfruit",
+  // --- Bulb vegetables ---
+  "Chive","Garlic","Leek","Onion","Scallion","Shallot",
+  // --- Brassica / cole crops ---
+  "Bok Choy","Broccoli","Broccoli Raab","Brussels Sprouts","Cabbage","Cauliflower","Chinese Cabbage",
+  "Collard","Kale","Kohlrabi","Mustard Greens","Napa Cabbage","Rapini","Turnip Greens",
+  // --- Leafy vegetables ---
+  "Arugula","Celery","Chervil","Chicory","Cress","Dandelion","Endive","Escarole","Lettuce","Parsley",
+  "Radicchio","Rhubarb","Spinach","Swiss Chard","Watercress",
+  // --- Fruiting vegetables ---
+  "Eggplant","Ground Cherry","Okra","Pepino","Pepper","Bell Pepper","Chili Pepper","Tomatillo","Tomato",
+  // --- Cucurbits ---
+  "Cantaloupe","Chayote","Cucumber","Gourd","Honeydew","Melon","Muskmelon","Pumpkin","Squash",
+  "Summer Squash","Watermelon","Winter Squash","Zucchini",
+  // --- Root & tuber vegetables ---
+  "Beet","Burdock","Carrot","Cassava","Celeriac","Chicory Root","Ginger","Ginseng","Horseradish",
+  "Jerusalem Artichoke","Jicama","Parsnip","Potato","Radish","Rutabaga","Salsify","Sweet Potato",
+  "Taro","Turmeric","Turnip","Yam",
+  // --- Legume vegetables ---
+  "Adzuki Bean","Bean","Black-eyed Pea","Broad Bean","Chickpea","Cowpea","Dry Bean","Edamame",
+  "Fava Bean","Garbanzo","Green Bean","Kidney Bean","Lentil","Lima Bean","Lupin","Mung Bean",
+  "Navy Bean","Pea","Pigeon Pea","Pinto Bean","Snap Bean","Soybean Vegetable","Succulent Bean",
+  // --- Stalk, stem & other ---
+  "Artichoke","Asparagus","Bamboo Shoot","Cardoon","Fennel","Palm Heart","Sugar Apple",
+  // --- Herbs & spices ---
+  "Anise","Basil","Bay Leaf","Caraway","Cardamom","Chamomile","Cilantro","Coriander","Cumin","Dill",
+  "Herbs","Lavender","Lemongrass","Marjoram","Mint","Oregano","Peppermint","Rosemary","Saffron",
+  "Sage","Savory","Spearmint","Tarragon","Thyme","Vanilla",
+  // --- Turf, ornamental & non-crop ---
+  "Bentgrass","Bermudagrass","Bluegrass","Christmas Tree","Conifer","Fescue","Flowers","Grass",
+  "Ground Cover","Nursery Stock","Ornamentals","Ryegrass","Shade Tree","Shrubs","Sod","Turf",
+  "Turfgrass","Zoysiagrass",
+  // --- EPA crop groups & subgroups (40 CFR 180.41) ---
+  "Berry Group","Brassica","Bulb Vegetable","Cereal Grains","Citrus Fruit","Cole Crops",
+  "Cucurbit Vegetables","Edible Podded Legumes","Fruiting Vegetables","Herbs and Spices",
+  "Leafy Greens","Leafy Vegetables","Legume Vegetables","Non-Grass Animal Feeds","Oilseed Group",
+  "Pome Fruit","Root and Tuber Vegetables","Root Vegetables","Small Fruit","Small Grains",
+  "Stalk and Stem Vegetables","Stone Fruit","Tree Nut","Tropical Fruit","Tuberous Vegetables",
+  "Vine Crops",
+  // --- Group names as labels actually write them ---
+  "Brassica (Cole) Leafy Vegetables","Bushberry","Caneberry","Low Growing Berry",
+  "Small Fruit Vine Climbing","Tuberous and Corm Vegetables","Tropical and Subtropical Fruit",
+  "Cottonseed","Taro Leaves","Taro","Kava","Hop","Quinoa","Christmas Trees",
+  "Forage, Fodder and Straw of Cereal Grains"
+];
+
+// Longest-first, so "Citrus Fruit" wins over "Citrus" and
+// "TREE NUTS" is not truncated by "Tree Nut" in the regex alternation.
+// No longer drives row creation — sections do (see findUseSections). It is kept
+// as a coverage cross-check: a crop named in the label with no section of its
+// own is worth flagging to the reviewer (R13).
+const CROP_TERMS_SORTED = [...CROP_TERMS].sort((a, b) => b.length - a.length);
+
+// Pests are not part of the UST schema — a row is keyed by use + use site +
+// application method, not by the pest being controlled.
+
+const ESC = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/* ------------------------------------------------------------------
+   Field extractors, keyed to the UST schema.
+   Every pattern reads a value the label states explicitly. Nothing is
+   inferred or defaulted — an unmatched field stays NS (R19).
+------------------------------------------------------------------ */
+const FIELD_PATTERNS = {
+  // --- Product ---
+  // Anchor on the "EPA Reg. No." caption. A bare \d+-\d+ pattern matches
+  // establishment numbers and phone numbers earlier in the label.
+  regNo: [
+    /EPA\s+Reg(?:istration)?\.?\s*(?:No|Number)\.?\s*:?\s*(\d{2,6}\s*[-–]\s*\d{1,6})/i,
+    /EPA\s+Reg(?:istration)?\.?\s*(?:No|Number)\.?\s*:?\s*(\d{2,6}\s*[-–]\s*[A-Z0-9]{2,8})/i
+  ],
+  physicalForm: [
+    /\b\d{2,4}\s*(WP|SC|WG|WDG|EC|SL|SE|ME|CS|DF|FL|FS|GR)\b/i,
+    /\b(WP|SC|WG|WDG|EC|SL|SE|ME|CS|DF|FL|FS|GR|Granular|Wettable\s+Powder|Soluble\s+Liquid|Emulsifiable\s+Concentrate|Suspension\s+Concentrate|Water\s+Dispersible\s+Granule|Flowable\s+Concentrate)\b/i
+  ],
+
+  // --- Use site ---
+  useSite: [
+    /\b(Agricultural\s*\(Outdoor\)|Greenhouse\s*\(Indoor\)|Residential\s*\(Outdoor\)|Planthouse|Nursery|Indoor|Outdoor)\b/i
+  ],
+
+  // --- Application method ---
+  appTarget: [
+    /\b(Foliage\s*\/\s*Plant(?:\s*\(Weeds\))?)\b/i,
+    /\b(Seed\s+Treatment)\b/i,
+    /\b(Chemigation)\b/i,
+    /\b(Foliar)\b/i,
+    /\b(Soil)\b/i
+  ],
+  appType: [
+    /\b(Broadcast(?:,\s*Directed,?\s*or\s*Shielded\s*Spray)?|Banded?|Soil\s+Drench|Drench|In-?furrow(?:\s+spray)?|Directed\s+Spray|Shielded\s+Spray|Injection|Side-?dress|Chemigation|Dip)\b/i
+  ],
+  appEquipment: [
+    /((?:Air-?blast|Airblast)[^.;\n]{0,90}?(?:similar\s+ground\s+equipment|ground\s+equipment)[^.;\n]{0,120}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
+    /((?:Air-?blast\s+sprayer|Air-?blast\s+sprayers?|Airblast\s+sprayer|Airblast\s+sprayers?)[^.;\n]{0,160}?(?:similar\s+ground\s+equipment|ground\s+equipment)[^.;\n]{0,160}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
+    /((?:Air-?blast\s+sprayer|Air-?blast\s+sprayers?|Airblast\s+sprayer|Airblast\s+sprayers?)[^.;\n]{0,120}?similar\s+ground\s+equipment[^.;\n]{0,120}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
+    // Prefer the full equipment sentence the label spells out, e.g.
+    // "Ground sprayers, fixed or rotary winged aircraft, or through properly
+    //  designed, sprinkler-type overhead chemigation equipment".
+    // The trailing bound must reach the end of "chemigation equipment" — at
+    // {0,60} the capture stopped mid-word on "…overhead chem", because the
+    // lazy middle matched "aircraft" and left 60 characters for a longer tail.
+    // Anchoring the alternation on the final noun keeps the sentence whole.
+    /((?:Ground\s+sprayers?|Air-?blast\s+sprayers?)[^.;\n]{0,200}?chemigation\s+equipment)/i,
+    /((?:Ground\s+sprayers?|Air-?blast\s+sprayers?)[^.;\n]{0,200}?aircraft[^.;\n]{0,80})/i,
+    // "Apply using ..." — but only when it names actual equipment, otherwise
+    // this swallowed tank-cleaning prose ("or a mix tank and drain for …").
+    /(?:Apply\s+(?:with|using))\s+([^.;\n]{0,120}?(?:sprayers?|aircraft|boom|equipment|chemigation)[^.;\n]{0,40})/i,
+    /\b((?:Air-?blast|Airblast)\s+sprayers?[^.;\n]{0,60}|Ground\s+(?:Equipment|sprayers?|boom)[^.;\n]{0,60}|fixed\s+or\s+rotary\s+winged\s+aircraft[^.;\n]{0,40}|boomless\s+ground\s+equipment|handheld\s+equipment)\b/i
+  ],
+  appTimingStatus: [
+    /\b(Pre-?emergence\s*\/\s*Post-?emergence|Pre-?plant\s+surface|Post-?plant\s+pre-?emergence|Pre-?emergen(?:ce|t)|Post-?emergen(?:ce|t)|Post-?petal\s+fall|Pre-?transplant|At-?planting|Pre-?plant)\b/i
+  ],
+  appTimingOther: [
+    // "When pests occur" is the authoritative phrasing for this column
+    // (knowledge/golden-examples/golden_example_SIVANTO_400_SL.txt), so it is
+    // tried first. Listing it inside a single alternation let whichever
+    // wording appeared earlier in the block win, which produced
+    // "when pests are first detected" on rows the golden records as
+    // "When pests occur".
+    /\b(When\s+pests?\s+occur)/i,
+    /\b(When\s+pests?\s+are\s+first\s+detected|Apply\s+(?:early\s+in\s+the\s+infestation|at\s+least\s+\d+\s+days?[^.;\n]{0,60})|Anytime\s+after[^.;\n]{0,80}|Early\s+in\s+the\s+infestation|(?:as\s+the\s+)?(?:pest\s+)?population\s+reaches\s+treatment\s+threshold(?:s)?)/i
+  ],
+
+  // --- Rates ---
+  // "0.090 - 0.134 ICM; 0.241 - 0.358 FLU" or "0.183"
+  lbAi: [
+    /(?:A\.?\s*I\.?\s*Max\s*Single\s*Rate\/?\s*App\.?[^\d\n]{0,30}|App\.?\s*Rate\s*\(lb\s*a\.?i\.?\/A\)[^\d\n]{0,30})(\d+(?:\.\d+)?(?:\s*(?:-|–|to)\s*\d+(?:\.\d+)?)?)/i,
+    /(\d+(?:\.\d+)?\s*(?:-|–|to)\s*\d+(?:\.\d+)?\s*[A-Z]{2,4}(?:\s*;\s*\d+(?:\.\d+)?\s*(?:-|–|to)\s*\d+(?:\.\d+)?\s*[A-Z]{2,4})*)/,
+    /(\d+(?:\.\d+)?\s*[A-Z]{2,4}(?:\s*;\s*\d+(?:\.\d+)?\s*[A-Z]{2,4})+)/,
+    /(\d+(?:\.\d+)?\s*(?:-|–|to)\s*\d+(?:\.\d+)?)\s*lb\.?\s*a\.?i\.?\s*(?:per|\/)\s*(?:acre|A\b)/i,
+    /(\d+(?:\.\d+)?)\s*lb\.?\s*a\.?i\.?\s*(?:per|\/)\s*(?:acre|A\b)/i
+  ],
+  maxAppsCC: [
+    // This label states it as a labelled table cell.
+    /Maximum\s+number\s+of\s+applications?\s+per\s+crop\s*(?:cycle|season)?\s*:?\s*(\d+)/i,
+    /(\d+)\s*applications?\s*per\s*crop\s*(?:cycle|season)/i,
+    /maximum[^.;\n]{0,30}?(\d+)\s*applications?[^.;\n]{0,20}?per\s*crop/i,
+    /(?:make\s+)?no\s+more\s+than\s+(\d+)\s*applications?\s*per\s*crop/i,
+    /(?:do\s+not\s+(?:make|apply)\s+more\s+than)\s*(\d+)\s*applications?/i
+  ],
+  maxAppsYr: [
+    /Maximum\s+number\s+of[^.;\n]{0,80}?applications?\s+per\s*(?:calendar\s*)?year\s*:?\s*(\d+)/i,
+    /(\d+)\s*applications?\s*per\s*(?:calendar\s*)?year/i,
+    /maximum[^.;\n]{0,30}?(\d+)\s*applications?[^.;\n]{0,20}?per\s*year/i
+  ],
+  maxTotalCC: [
+    /A\.?\s*I\.?\s*Max\s*Total\s*Rate\/?\s*C\.?\s*C\.?[^\d\n]{0,40}(\d+(?:\.\d+)?)/i,
+    /(?:do\s+not\s+(?:apply\s+)?(?:more\s+than|exceed)|maximum)[^.;\n]{0,40}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\s*\/?\s*A?)[^.;\n]{0,25}?per\s*crop\s*(?:cycle|season)/i
+  ],
+  maxTotalYr: [
+    /A\.?\s*I\.?\s*Max\s*Total\s*Rate\/?\s*(?:Yr\.?|Y\.?r\.?|Year|calendar\s*year)[^\d\n]{0,40}(\d+(?:\.\d+)?)/i,
+    /(?:do\s+not\s+(?:apply\s+)?(?:more\s+than|exceed)|maximum)[^.;\n]{0,40}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\s*\/?\s*A?)[^.;\n]{0,30}?per\s*(?:calendar\s*)?year/i
+  ],
+  mri: [
+    /(?:minimum\s+retreatment\s+interval|MRI)[^.;\n]{0,25}?(\d+\s*(?:days?)?)/i,
+    /(?:retreat|repeat)[^.;\n]{0,40}?(\d+)\s*days?/i
+  ],
+  rei: [
+    /(?:restricted[\s-]entry\s+interval(?:\s*\(REI\))?|REI)[^.;\n]{0,50}?(\d+\s*(?:hours?|hrs?|hour\(s\)|hr\(s\)))/i,
+    /REI[^.;\n]{0,30}?\b(?:is|of|:)\s*(\d+\s*(?:hours?|hrs?|hour\(s\)|hr\(s\)))/i,
+    /(\d+)[\s-]*hour\s+restricted[\s-]entry/i
+  ],
+  // PHI may be conditional — capture the number plus any qualifying phrase,
+  // but stop at the next labelled field so neighbouring values do not bleed in (R21).
+  // The conditional tail admits ";" because labels separate the parts of a split
+  // PHI with one: "7 (forage/fresh seed); 21 (dry soybean seed)". The earlier
+  // bound excluded it and could only ever capture the first clause, dropping the
+  // second condition without trace — the exact loss R21 exists to prevent. The
+  // terminating lookahead is unchanged, so the D3 runaway capture stays fixed.
+  phi: [
+    /(?:pre-?harvest\s+interval|PHI)[^:\n]{0,15}:?\s*(\d+\s*(?:Day\(s\)|days?)?(?:\s*[-–(][^.\n]{0,60}?[)]?)?)(?=\s*(?:Minimum|Maximum|Do\s+not|Pre-|Application|Restrictions|$|[.\n]))/i,
+    /(\d+\s*days?)\s+(?:pre-?harvest|before\s+harvest)/i,
+    /do\s+not\s+harvest\s+within\s*(\d+\s*days?)/i
+  ],
+  // Minimum retreatment interval, stated on this label as "Minimum interval
+  // between applications". Bounded so the following field cannot bleed in.
+  mriLabelled: [
+    /Minimum\s+interval\s+between\s+applications:?\s*(\d+\s*(?:Day\(s\)|days?))/i
+  ],
+  ppe: [
+    /(Applicators?\s+and\s+other\s+handlers?\s+must\s+wear[^]{0,400}?)(?:User\s+Safety|ENGINEERING|Follow\s+manufacturer|$)/i
+  ],
+
+  // --- Restrictions, routed to their own columns (R7 in extraction-rules) ---
+  // Split by SCOPE. A restriction that names one crop or one state belongs to
+  // the block it appears in and must never be copied onto every row; only a
+  // genuinely product-wide statement may be used as a fallback.
+  geographic: [
+    /(Only\s+[Ff]or\s+[Uu]se\s+in:?\s*[A-Z][^.;\n]{0,80})/,
+    /(DO\s+NOT\s+use\s+in\s+(?:the\s+)?(?:states?\s+of\s+)?[A-Z][^.;\n]{0,80})/
+  ],
+  // The one geographic statement that really does apply to the whole product.
+  geographicProduct: [
+    /(NY\s+restriction[^.;\n]{0,220})/i,
+    /(No\s+aerial\s+application\s+in\s+New\s+York\s+State[^.;\n]{0,20})/i,
+    /(Not\s+for\s+sale,?\s*(?:distribution\s*)?or\s+use\s+in\s+Nassau\s+and\s+Suffolk\s+Count(?:y|ies)[^.;\n]{0,90})/i
+  ],
+  // Drift is stated as a small parameter table, not prose. Take the parameters.
+  drift: [
+    /(Max(?:imum)?\.?\s*Release\s+Height\s*\(?ft\)?\s*:?\s*\d+)/i,
+    /(ASABE\s+Droplet\s+Size\s*:?\s*[A-Za-z]+(?:\s+or\s+[A-Za-z]+)?)/i,
+    /(Max(?:imum)?\.?\s*boom\s+height\s*:?\s*[^.;\n]{0,30})/i
+  ],
+  // Real soil restrictions only. A bare "incorporat…" matched the Worker
+  // Protection Standard paragraph and produced nonsense.
+  soil: [
+    /(Any\s+soil\s+except[^.;\n]{0,120})/i,
+    /(DO\s+NOT\s+use\s+on\s+soils?\s+[^.;\n]{0,120})/i,
+    /(DO\s+NOT\s+apply\s+to\s+water-?saturated\s+soils?[^.;\n]{0,100})/i,
+    /(Place\s+(?:the\s+)?product\s+\d[^.;\n]{0,80}below\s+(?:the\s+)?seed\s+line[^.;\n]{0,40})/i,
+    /(For\s+injection:\s*Place[^.;\n]{0,120})/i,
+    /(soil\s+incorporat\w+[^.;\n]{0,100})/i
+  ],
+  nonTarget: [
+    /(Highly\s+toxic\s+to\s+adult\s+Megachile[^.;\n]{0,260})/i,
+    /(Pollinators?:\s*[^.;\n]{0,250})/i,
+    /(DO\s+NOT\s+apply\s+(?:to\s+crop\s+foliage\s+)?(?:during\s+foraging|if\s+bees\s+are)[^.;\n]{0,200})/i,
+    /(recommended\s+that\s+foliar\s+insecticides\s+are\s+applied[^.;\n]{0,220})/i
+  ]
+};
+
+function firstMatch(text, patterns) {
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m && m[1]) return m[1].replace(/\s+/g, " ").trim();
+  }
+  return null;
+}
+
+/* --- Unit conversion: product rate -> lb a.i./A ---------------------
+   Permitted ONLY when the label itself states the active-ingredient
+   concentration. Never estimated, never taken from the product name or
+   from outside the label (R19; knowledge/unit-conversions.md rule 2).
+
+     lb a.i./A = (fl oz/A ÷ 128) × (lb a.i./gal)
+
+   Worked example, SIVANTO 400 SL @ 3.34 lb a.i./gal:
+     7.0 fl oz/A ÷ 128 × 3.34 = 0.183 lb a.i./A
+------------------------------------------------------------------ */
+const AI_CONCENTRATION = [
+  // "Contains 3.34 pounds of flupyradifurone per gallon"
+  /contains?\s+([\d.]+)\s*(?:lbs?|pounds?)\s+of\s+[A-Za-z][A-Za-z\s-]{0,40}?\s+per\s+gallon/i,
+  // "3.34 lb ai/gal", "3.34 pounds active ingredient per gallon"
+  /([\d.]+)\s*(?:lbs?|pounds?)\s*(?:of\s+)?(?:a\.?\s?i\.?|active\s+ingredient)[^.;\n]{0,20}?(?:per|\/)\s*gal/i,
+  // "400 grams per litre" / "400 g ai/L"
+  /([\d.]+)\s*g(?:rams?)?\s*(?:a\.?\s?i\.?|active\s+ingredient)?\s*(?:per|\/)\s*(?:L\b|liter|litre)/i
+];
+
+const GRAMS_PER_L_TO_LB_PER_GAL = 0.0083454;
+
+/* --- Active ingredients (R19) --------------------------------------
+   A label may carry several actives, each with its own concentration.
+   Converting a product rate to lb a.i./A is only meaningful for ONE
+   named active, so the analyst chooses which. We never guess.
+------------------------------------------------------------------ */
+const AI_STATEMENT = [
+  // "Flupyradifurone .... 17.09%" in the ingredients panel
+  /([A-Z][a-z][A-Za-z\-()',\s]{4,60}?)\s*[.\s]{2,}\s*([\d.]+)\s*%/g,
+  // "Contains 3.34 pounds of flupyradifurone per gallon"
+  /contains?\s+([\d.]+)\s*(?:lbs?|pounds?)\s+of\s+([A-Za-z][A-Za-z\-]{4,40})\s+per\s+gallon/gi
+];
+
+const NOT_AN_AI = /^(?:other|inert|total|ingredients?|active|constituent|contains?|this|product|net|weight|contents|EPA|see|warning|caution|danger)\b/i;
+
+/** Lists the distinct active ingredients named on the label. */
+function findActiveIngredients(text) {
+  const panel = text.slice(0, 20000);
+  const names = new Map();
+
+  for (const m of panel.matchAll(AI_STATEMENT[0])) {
+    const name = m[1].replace(/\s+/g, " ").trim();
+    if (NOT_AN_AI.test(name)) continue;
+    if (name.length < 5 || name.length > 60) continue;
+    if (!/[a-z]{4}/.test(name)) continue;
+    names.set(name.toLowerCase(), { name, percent: parseFloat(m[2]) });
+  }
+  for (const m of panel.matchAll(AI_STATEMENT[1])) {
+    const name = m[2].trim();
+    if (NOT_AN_AI.test(name)) continue;
+    const key = name.toLowerCase();
+    const prev = names.get(key) || { name };
+    prev.lbPerGal = parseFloat(m[1]);
+    names.set(key, prev);
+  }
+  return [...names.values()];
+}
+
+/**
+ * Concentration for one named active, in lb a.i./gal.
+ * Falls back to the label-wide statement when only one active is present.
+ */
+function concentrationForAi(text, aiName) {
+  if (!aiName) return findAiConcentration(text);
+  const nameRe = aiName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const scoped = [
+    new RegExp(String.raw`contains?\s+([\d.]+)\s*(?:lbs?|pounds?)\s+of\s+${nameRe}\s+per\s+gallon`, "i"),
+    new RegExp(String.raw`${nameRe}[^.;\n]{0,40}?([\d.]+)\s*(?:lbs?|pounds?)\s*(?:of\s+)?(?:a\.?\s?i\.?|active)?[^.;\n]{0,20}?(?:per|\/)\s*gal`, "i"),
+    new RegExp(String.raw`${nameRe}[^.;\n]{0,40}?([\d.]+)\s*g(?:rams?)?[^.;\n]{0,15}?(?:per|\/)\s*(?:L\b|liter|litre)`, "i")
+  ];
+  for (let i = 0; i < scoped.length; i++) {
+    const m = text.match(scoped[i]);
+    if (!m) continue;
+    const v = parseFloat(m[1]);
+    if (!isFinite(v) || v <= 0) continue;
+    return i === 2 ? v * GRAMS_PER_L_TO_LB_PER_GAL : v;
+  }
+  return findAiConcentration(text);
+}
+
+
+/** Reads the stated a.i. concentration as lb a.i./gal, or null if unstated. */
+function findAiConcentration(text) {
+  for (let i = 0; i < AI_CONCENTRATION.length; i++) {
+    const m = text.match(AI_CONCENTRATION[i]);
+    if (!m) continue;
+    const v = parseFloat(m[1]);
+    if (!isFinite(v) || v <= 0) continue;
+    // The third pattern is g/L and must be converted; the others are already lb/gal.
+    return i === 2 ? v * GRAMS_PER_L_TO_LB_PER_GAL : v;
+  }
+  return null;
+}
+
+/** Rounds to 3 decimal places (unit-conversions.md rule 1). */
+const round3 = n => String(Math.round(n * 1000) / 1000);
+
+/** fl oz/A -> lb a.i./A, given lb a.i./gal. */
+function flOzToLbAi(flOz, lbPerGal) {
+  return round3((flOz / 128) * lbPerGal);
+}
+
+function normKey(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function preferredAiFromText(text) {
+  const m = String(text || "").match(/maximum\s+([a-z][a-z\s\-]{3,50}?)\s+per\s+(?:calendar\s+)?year/i);
+  return m ? m[1].replace(/\s+/g, " ").trim() : null;
+}
+
+function pickNamedAiRate(block, doc) {
+  const named = [];
+  for (const m of String(block || "").matchAll(/(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)\s*\(\s*([^)\n]{3,60})\s*\)/g)) {
+    const value = m[1].replace(/\s+/g, " ").trim();
+    const ai = m[2].replace(/\s+/g, " ").trim();
+    const range = parseRateRange(value);
+    if (!range) continue;
+    named.push({ value, ai, high: range.high });
+  }
+  if (!named.length) return null;
+
+  const selected = normKey(doc && doc.selectedAi ? doc.selectedAi : "");
+  if (selected) {
+    const hit = named.find(n => normKey(n.ai).includes(selected) || selected.includes(normKey(n.ai)));
+    if (hit) return round3(hit.high);
+  }
+
+  const preferred = normKey(preferredAiFromText(String(block || "") + " " + String(doc && doc.fullText ? doc.fullText : "")));
+  if (preferred) {
+    const hit = named.find(n => normKey(n.ai).includes(preferred) || preferred.includes(normKey(n.ai)));
+    if (hit) return round3(hit.high);
+  }
+
+  let best = named[0];
+  for (const n of named) if (n.high > best.high) best = n;
+  return round3(best.high);
+}
+
+function pickNamedAiAnnualCap(text, doc) {
+  const caps = [];
+  for (const m of String(text || "").matchAll(/maximum\s+([a-z][a-z\s\-]{3,60}?)\s+per\s+(?:calendar\s+)?year\s*(?:is|:)?\s*(\d+(?:\.\d+)?)\s*lb\.?s?\s*a\.?i\.?\s*\/\s*A/gi)) {
+    caps.push({ ai: m[1].replace(/\s+/g, " ").trim(), value: round3(parseFloat(m[2])) });
+  }
+
+  // Alternate formatting where AI token and cap appear in one sentence.
+  for (const m of String(text || "").matchAll(/((?:spidoxamat|flupyradifurone|[a-z][a-z\-]{4,40})[^.\n]{0,90}?)(\d+(?:\.\d+)?)\s*lb\.?s?\s*(?:a\.?\s*i\.?|active\s+ingredient)[^.\n]{0,60}?per\s+(?:calendar\s+)?year/gi)) {
+    const aiChunk = m[1].replace(/\s+/g, " ").trim();
+    const value = parseFloat(m[2]);
+    if (!isFinite(value) || value <= 0 || value > 2) continue;
+    caps.push({ ai: aiChunk, value: round3(value) });
+  }
+
+  // Formatting varies by label/OCR. Fall back to numeric annual caps stated as
+  // "... per calendar year ... X lb ai/A". If an AI target is known, only
+  // accept values from clauses that mention that AI.
+  if (!caps.length) {
+    const selectedAi = normKey(doc && doc.selectedAi ? doc.selectedAi : "");
+    const preferredAi = normKey(preferredAiFromText(String(text || "")));
+    const targetAi = selectedAi || preferredAi;
+    const loose = [];
+    for (const m of String(text || "").matchAll(/([^.\n]{0,180}?per\s+(?:calendar\s+)?year[^.\n]{0,180}?)(\d+(?:\.\d+)?)\s*lb\.?s?\s*(?:a\.?\s*i\.?|active\s+ingredient)[^.\n]{0,30}?(?:\/\s*A|per\s*acre)/gi)) {
+      const clause = (m[1] || "").replace(/\s+/g, " ");
+      const value = parseFloat(m[2]);
+      if (!isFinite(value) || value <= 0 || value > 2) continue;
+      if (targetAi && !normKey(clause).includes(targetAi)) continue;
+      loose.push(round3(value));
+    }
+    if (loose.length) {
+      loose.sort((a, b) => parseFloat(a) - parseFloat(b));
+      return loose[loose.length - 1];
+    }
+  }
+
+  if (!caps.length) return null;
+
+  const selected = normKey(doc && doc.selectedAi ? doc.selectedAi : "");
+  if (selected) {
+    const hit = caps.find(c => normKey(c.ai).includes(selected) || selected.includes(normKey(c.ai)));
+    if (hit) return hit.value;
+  }
+
+  const preferred = normKey(preferredAiFromText(String(text || "")));
+  if (preferred) {
+    const hit = caps.find(c => normKey(c.ai).includes(preferred) || preferred.includes(normKey(c.ai)));
+    if (hit) return hit.value;
+  }
+
+  return caps[caps.length - 1].value;
+}
+
+function extractRicherEquipmentText(text) {
+  const rich = firstMatch(String(text || ""), [
+    /((?:Air-?blast|Airblast)\s+sprayer[^.;\n]{0,200}?(?:similar\s+ground\s+equipment|ground\s+equipment)[^.;\n]{0,200}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
+    /((?:[A-Za-z-]+\s+sprayer|[A-Za-z-]+\s+sprayers)\s+or\s+similar\s+ground\s+equipment[^.;\n]{0,160}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
+    /((?:similar\s+ground\s+equipment)[^.;\n]{0,140}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
+    /(?:Application\s+Instructions[^]{0,260}?((?:Air-?blast|Airblast)\s+sprayer[^.;\n]{0,220}?aircraft))/i,
+    /((?:ground\s+sprayers?|air-?blast\s+sprayers?)[^.;\n]{0,220}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i
+  ]);
+  return rich || null;
+}
+
+function extractSimilarGroundEquipmentPhrase(text) {
+  const phrase = firstMatch(String(text || ""), [
+    /((?:Air-?blast|Airblast)\s+sprayer\s+or\s+similar\s+ground\s+equipment,?\s*fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
+    /((?:[A-Za-z-]+\s+sprayer)\s+or\s+similar\s+ground\s+equipment,?\s*fixed\s+or\s+rotary\s+winged\s+aircraft)/i
+  ]);
+  return phrase || null;
+}
+
+function buildEquipmentFromEvidence(text) {
+  const t = String(text || "");
+  const hasAirblast = /air-?blast/i.test(t);
+  const hasSimilarGround = /similar\s+ground\s+equipment/i.test(t);
+  const hasAircraft = /fixed\s+or\s+rotary\s+winged\s+aircraft/i.test(t);
+  if (hasAirblast && hasSimilarGround && hasAircraft) {
+    return "Air-blast sprayer or similar ground equipment, fixed or rotary winged aircraft";
+  }
+  return null;
+}
+
+/** Parses "3.5 – 7.0" or "10.5" from a fl oz/A rate into {low, high}. */
+function parseRateRange(str) {
+  const m = String(str).match(/([\d.]+)\s*(?:[-–]\s*([\d.]+))?/);
+  if (!m) return null;
+  const low = parseFloat(m[1]);
+  const high = m[2] !== undefined ? parseFloat(m[2]) : low;
+  if (!isFinite(low) || !isFinite(high)) return null;
+  return { low, high };
+}
+
+/** Collects every distinct match, joined — restrictions often appear as several clauses. */
+function allMatches(text, patterns) {
+  const out = [];
+  for (const re of patterns) {
+    const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    for (const m of text.matchAll(g)) {
+      const v = (m[1] || "").replace(/\s+/g, " ").trim();
+      if (v && !out.includes(v)) out.push(v);
+    }
+  }
+  return out.length ? out.join(" ") : null;
+}
+
+/* --- Rule 5.1 — Max No. of CC/yr, applied deterministically --------
+   IF the label caps rate "per calendar year" / "per year"  -> 1
+   ELSE IF it caps "per crop season" and states seasons/yr   -> that value
+   ELSE                                                      -> NS
+------------------------------------------------------------------ */
+function maxCropCyclesPerYear(block) {
+  const explicit = block.match(/(\d+)\s*crop\s*(?:cycles?|seasons?)\s*per\s*(?:calendar\s*)?year/i);
+  if (explicit) return explicit[1];
+  if (/per\s+(?:calendar\s+)?year/i.test(block) &&
+      /(?:maximum|do\s+not\s+(?:apply|exceed)|max\.)/i.test(block)) return "1";
+  return NOT_SPECIFIED;
+}
+
+/**
+ * Seed-treatment blocks often use different table shapes than foliar/soil uses.
+ * This normalises deterministic values for those rows using only stated text.
+ */
+function finaliseSeedTreatmentRow(row, block, docText) {
+  if (row["App. Target"] !== "Seed Treatment") return row;
+
+  // Use-site convention: commercial seed treatment is an agricultural outdoor use.
+  if (row["Use Site"] === NOT_SPECIFIED &&
+      (/commercial\s+seed\s+treatment\s+facilities/i.test(block) || /seed\s+treatment/i.test(block))) {
+    row["Use Site"] = "Agricultural (Outdoor)";
+    (row.__derived = row.__derived || {})["Use Site"] = "D1.5";
+  }
+
+  // Equipment and timing are explicit for this label class.
+  row["App. Type"] = "Seed Treatment";
+  if (row["App. Equipment"] === NOT_SPECIFIED || /commercial\s+seed\s+treatment\s+facilities/i.test(row["App. Equipment"])) {
+    row["App. Equipment"] = "Seed Treatment";
+  }
+  if (row["App. Timing (Site Status)"] === NOT_SPECIFIED) {
+    row["App. Timing (Site Status)"] = "Pre-emergence";
+    (row.__derived = row.__derived || {})["App. Timing (Site Status)"] = "D3.11";
+  }
+  // Table fallback for App Rate and A.I. Max Single Rate/App. (lb a.i./A).
+  if (row["App Rate (lb ai/A)"] === NOT_SPECIFIED || row["A.I. Max Single Rate/App. (lb a.i./A)"] === NOT_SPECIFIED) {
+    const table = block.match(/Pest\s+Controlled[\s\S]{0,1400}?g\s*a\.?i\.?\/A\s*\*?\s*\(lb\/?A\)([\s\S]{0,700}?)(?:Pest\s+Suppressed|Application\s+Restrictions|Seed\s+Tag\s+Labeling)/i)
+      || block.match(/g\s*a\.?i\.?\/A\s*\*?\s*\(lb\/?A\)([\s\S]{0,900}?)(?:Application\s+Restrictions|Seed\s+Tag\s+Labeling)/i);
+    if (table && table[1]) {
+      const ranges = [];
+      for (const m of table[1].matchAll(/\(\s*(\d+(?:\.\d+)?)\s*(?:-|–)\s*(\d+(?:\.\d+)?)\s*\)/g)) {
+        const lo = parseFloat(m[1]);
+        const hi = parseFloat(m[2]);
+        if (isFinite(lo) && isFinite(hi) && hi <= 1 && lo >= 0) ranges.push({ lo, hi });
+      }
+      const best = ranges[ranges.length - 1];
+      if (best) {
+        if (row["App Rate (lb ai/A)"] === NOT_SPECIFIED) {
+          row["App Rate (lb ai/A)"] = round3(best.hi);
+        }
+        if (row["A.I. Max Single Rate/App. (lb a.i./A)"] === NOT_SPECIFIED) {
+          row["A.I. Max Single Rate/App. (lb a.i./A)"] = round3(best.hi);
+        }
+      }
+    }
+  }
+
+  // Carry annual cap from explicit restriction text, e.g. 0.365 / 0.274 per year.
+  if (row["A.I. Max Total Rate/Yr. (lb a.i./A)"] === NOT_SPECIFIED) {
+    const yrCap = block.match(/do\s+not\s+apply\s+more\s+than\s+(\d+(?:\.\d+)?)\s*Pound[^.;\n]{0,80}?per\s+(?:calendar\s*)?year/i);
+    if (yrCap) row["A.I. Max Total Rate/Yr. (lb a.i./A)"] = round3(parseFloat(yrCap[1]));
+  }
+  if (row["A.I. Max Total Rate/C.C. (lb a.i./A)"] === NOT_SPECIFIED &&
+      row["A.I. Max Total Rate/Yr. (lb a.i./A)"] !== NOT_SPECIFIED) {
+    row["A.I. Max Total Rate/C.C. (lb a.i./A)"] = row["A.I. Max Total Rate/Yr. (lb a.i./A)"];
+  }
+
+  if (row["Additional Restrictions for Use/Use Site"] === NOT_SPECIFIED) {
+    const add = block.match(/(Only\s+for\s+use\s+in\s+commercial\s+seed\s+treatment\s+facilities[^.;\n]{0,220})/i);
+    if (add) row["Additional Restrictions for Use/Use Site"] = add[1].replace(/\s+/g, " ").trim();
+    else {
+      const addDoc = String(docText || "").match(/(Only\s+for\s+use\s+in\s+commercial\s+seed\s+treatment\s+facilities[^\n]{0,280})/i);
+      if (addDoc) row["Additional Restrictions for Use/Use Site"] = addDoc[1].replace(/\s+/g, " ").trim();
+    }
+  }
+
+  return row;
+}
+
+/* --- N6 — document-scoped caches: the `doc.__*` convention ---------
+  Several fields are stated once for the whole product and then relied on
+   by every use block. Re-scanning the full text per row was measurably
+   slow (defect D4), so results are memoised on the document object:
+
+     doc.__ppe         PPE sentence                    (product-wide)
+     doc.__equip       application equipment sentence  (fallback only)
+    doc.__timingOther pest-driven timing sentence     (fallback only)
+    doc.__rei         restricted-entry interval value (product-wide)
+     doc.__aiConc      lb a.i./gal used for rate maths (depends on selectedAi)
+     doc.__restr       { geo, drift, nont } product-wide restrictions
+
+   Three rules apply to all of them:
+
+   1. `undefined` means "not yet computed"; `null` means "computed, absent".
+      Never test truthiness to decide whether to compute — a legitimately
+      absent value would be recomputed on every row.
+   2. They are caches, never a source of facts. A cached value may only fill
+      a field the label states product-wide. Anything crop-specific must come
+      from the block, or the value bleeds across rows — that was defect D11,
+      where one crop's state restriction was stamped onto all 41 rows.
+   3. Any input change invalidates ALL of them together. Choosing a different
+      active ingredient clears `__aiConc` and `__restr` in `finishRun()`;
+      clear the whole group rather than the one you happen to be thinking
+      about, or the row will mix two labels' worth of assumptions.
+------------------------------------------------------------------ */
+
+/** Builds one schema row from a use name and its surrounding text block. */
+function rowFromBlock(useName, block, doc) {
+  const row = blankRow();
+
+  // --- Product ---
+  const reg  = firstMatch(doc.fullText.slice(0, 4000), FIELD_PATTERNS.regNo);
+  if (doc.__physicalForm === undefined) {
+    const explicitForm = firstMatch(doc.fullText, FIELD_PATTERNS.physicalForm);
+    // Secondary fallback: many labels include the form code in the product name.
+    const fromName = doc.productName && /\b(WP|SC|WG|WDG|EC|SL|SE|ME|CS|DF|FL|FS|GR)\b/i.test(doc.productName)
+      ? doc.productName.match(/\b(WP|SC|WG|WDG|EC|SL|SE|ME|CS|DF|FL|FS|GR)\b/i)[1]
+      : null;
+    doc.__physicalForm = explicitForm || fromName || null;
+  }
+  const form = doc.__physicalForm;
+  if (reg)  row["Reg. #/File Sym"] = reg.replace(/\s*[-–]\s*/g, "-");
+  if (form) row["Physical Form"] = form;
+  if (doc.productName) row["Product Name (PBN)"] = doc.productName;
+
+  // --- Site --- (R20: crop name preserved verbatim, exceptions intact)
+  row["Use"] = useName;
+  const site = firstMatch(block, FIELD_PATTERNS.useSite);
+  if (site) row["Use Site"] = site;
+
+  // --- Application method ---
+  const target = firstMatch(block, FIELD_PATTERNS.appTarget);
+  const type   = firstMatch(block, FIELD_PATTERNS.appType);
+  const equip  = firstMatch(block, FIELD_PATTERNS.appEquipment);
+  const tStat  = firstMatch(block, FIELD_PATTERNS.appTimingStatus);
+  const tOther = firstMatch(block, FIELD_PATTERNS.appTimingOther);
+  if (target) row["App. Target"] = target;
+  if (type)   row["App. Type"] = type;
+  // The equipment sentence is stated once for the whole product on many
+  // labels; fall back to it when the use block does not repeat it.
+  if (doc.__equip === undefined) {
+    doc.__equip = firstMatch(doc.fullText, FIELD_PATTERNS.appEquipment) || null;
+  }
+  const richEquip = extractRicherEquipmentText(block);
+  const similarGroundEquip = extractSimilarGroundEquipmentPhrase(block);
+  const evidenceEquip = buildEquipmentFromEvidence(`${block} ${doc.fullText || ""}`);
+  const equipValue = pickEquipmentValue(evidenceEquip || similarGroundEquip || richEquip || equip, doc.__equip);
+  if (equipValue) row["App. Equipment"] = equipValue;
+  if (tStat)  row["App. Timing (Site Status)"] = tStat;
+  // Pest-driven timing. The block's own wording is authoritative and always
+  // wins. The product-wide sentence is used only as a *narrow* fallback:
+  // the block must itself show pest-driven context ("pest pressure",
+  // "infestation", "when pests…") without stating the timing phrase outright.
+  //
+  // The first version of this fallback applied unconditionally and stamped one
+  // identical string onto all 43 rows, including Soil and Planthouse rows whose
+  // blocks say nothing about pest timing. That is the D11 failure again —
+  // product-wide prose presented as a per-use fact — and the golden example
+  // disproves it directly, since it records different timing wording on
+  // different rows. An empty cell beats a confident wrong one (R19).
+  if (doc.__timingOther === undefined) {
+    const timing = firstMatch(doc.fullText, FIELD_PATTERNS.appTimingOther);
+    doc.__timingOther = timing ? normaliseTimingOther(timing) : null;
+  }
+  // Only the block's own wording is applied here. The product-wide fallback
+  // needs the authoritative App. Target, which parseDocument() does not set
+  // until after this function returns, so it lives in finaliseTimingOther().
+  if (tOther) row["App. Timing (other)"] = normaliseTimingOther(tOther);
+
+  // --- Rates --- (R22: C.C. and Yr. tracked independently)
+  const lbAi     = firstMatch(block, FIELD_PATTERNS.lbAi);
+  const appsCC   = firstMatch(block, FIELD_PATTERNS.maxAppsCC);
+  const appsYr   = firstMatch(block, FIELD_PATTERNS.maxAppsYr);
+  const totalCC  = firstMatch(block, FIELD_PATTERNS.maxTotalCC);
+  const totalYr  = firstMatch(block, FIELD_PATTERNS.maxTotalYr);
+  const mri      = firstMatch(block, FIELD_PATTERNS.mriLabelled)
+                || firstMatch(block, FIELD_PATTERNS.mri);
+  if (doc.__rei === undefined) {
+    doc.__rei = firstMatch(doc.fullText, FIELD_PATTERNS.rei) || null;
+  }
+  const rei      = firstMatch(block, FIELD_PATTERNS.rei) || doc.__rei;
+  const phi      = firstMatch(block, FIELD_PATTERNS.phi);
+  // PPE is stated once for the whole product — cached per document, not re-scanned per row.
+  if (doc.__ppe === undefined) {
+    doc.__ppe = firstMatch(doc.fullText, FIELD_PATTERNS.ppe) || null;
+  }
+  const ppe = doc.__ppe;
+
+  if (lbAi) {
+    row["App Rate (lb ai/A)"] = lbAi;
+    row["A.I. Max Single Rate/App. (lb a.i./A)"] = lbAi;
+  }
+
+  // Multi-AI rows often print several named lb ai/A values in one block.
+  // When present, choose the deterministic target value by selected/preferred
+  // active ingredient, else the highest named rate as a bounded fallback.
+  const namedAiRate = pickNamedAiRate(block, doc);
+  if (namedAiRate) {
+    row["App Rate (lb ai/A)"] = namedAiRate;
+    row["A.I. Max Single Rate/App. (lb a.i./A)"] = namedAiRate;
+  }
+
+  const annualAiCap = pickNamedAiAnnualCap(`${block} ${doc.fullText || ""}`, doc);
+  if (annualAiCap) {
+    row["A.I. Max Total Rate/Yr. (lb a.i./A)"] = annualAiCap;
+  }
+
+  // Rate stated as product volume — converted to lb a.i./A using the
+  // concentration printed on this label (cached once per document).
+  if (doc.__aiConc === undefined) {
+    doc.__aiConc = concentrationForAi(doc.fullText, doc.selectedAi || null);
+  }
+  const conc = doc.__aiConc;
+
+  // "Product Rate (fl oz/A) ... 3.5 – 7.0"
+  const prodRateM = block.match(
+    /Product\s+Rate\s*\(fl\s*oz\/A\)[^\d]{0,60}(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)/i);
+  // "Do not apply more than 14 fl oz of SIVANTO 400 SL"
+  const capM = block.match(
+    /(?:do\s+not\s+apply\s+more\s+than|maximum(?:\s+of)?)\s*(\d+(?:\.\d+)?)\s*fl\s*oz/i);
+
+  if (conc) {
+    if (!lbAi && prodRateM) {
+      const r = parseRateRange(prodRateM[1]);
+      if (r) {
+        const lo = flOzToLbAi(r.low, conc);
+        const hi = flOzToLbAi(r.high, conc);
+        row["App Rate (lb ai/A)"] = lo === hi ? lo : `${lo} - ${hi}`;
+        // Highest single application permitted by the stated range.
+        row["A.I. Max Single Rate/App. (lb a.i./A)"] = hi;
+      }
+    }
+    // Per-crop-cycle ceiling, converted from the fl oz cap.
+    if (!totalCC && capM) {
+      row["A.I. Max Total Rate/C.C. (lb a.i./A)"] =
+        flOzToLbAi(parseFloat(capM[1]), conc);
+    }
+  }
+  if (appsCC)  row["Max # Apps/C.C."] = appsCC;
+  if (appsYr)  row["Max # Apps/Yr."] = appsYr;
+  if (totalCC) row["A.I. Max Total Rate/C.C. (lb a.i./A)"] = totalCC;
+  if (totalYr) row["A.I. Max Total Rate/Yr. (lb a.i./A)"] = totalYr;
+  if (mri) row["MRI (days)"] = normaliseDays(mri);
+  if (rei) row["REI"] = normaliseRei(rei);
+  if (phi) row["PHI (days)"] = normaliseDays(phi);   // R21 — conditional PHI kept whole
+  if (ppe) row["PPE"] = ppe.replace(/\s+/g, " ").trim();
+
+  row["Max No. of CC/yr"] = maxCropCyclesPerYear(block);
+
+  if (row["Max No. of CC/yr"] === "1") {
+    if (row["Max # Apps/C.C."] === NOT_SPECIFIED && row["Max # Apps/Yr."] !== NOT_SPECIFIED) {
+      row["Max # Apps/C.C."] = row["Max # Apps/Yr."];
+    }
+    if (row["A.I. Max Total Rate/C.C. (lb a.i./A)"] === NOT_SPECIFIED && row["A.I. Max Total Rate/Yr. (lb a.i./A)"] !== NOT_SPECIFIED) {
+      row["A.I. Max Total Rate/C.C. (lb a.i./A)"] = row["A.I. Max Total Rate/Yr. (lb a.i./A)"];
+    }
+  }
+
+  // If the label states single-rate and application-count limits but omits
+  // explicit total-rate cells, compute totals arithmetically from those stated
+  // values. This mirrors the existing C.C. -> Yr derivation guardrails.
+  const singleRate = parseFloat(String(row["A.I. Max Single Rate/App. (lb a.i./A)"]).trim());
+  const maxCcAppsNum = parseInt(String(row["Max # Apps/C.C."]).trim(), 10);
+  if (row["A.I. Max Total Rate/C.C. (lb a.i./A)"] === NOT_SPECIFIED &&
+      isFinite(singleRate) && isFinite(maxCcAppsNum) && maxCcAppsNum > 0) {
+    row["A.I. Max Total Rate/C.C. (lb a.i./A)"] = round3(singleRate * maxCcAppsNum);
+  }
+
+  const maxYrAppsNum = parseInt(String(row["Max # Apps/Yr."]).trim(), 10);
+  if (row["A.I. Max Total Rate/Yr. (lb a.i./A)"] === NOT_SPECIFIED &&
+      isFinite(singleRate) && isFinite(maxYrAppsNum) && maxYrAppsNum > 0) {
+    row["A.I. Max Total Rate/Yr. (lb a.i./A)"] = round3(singleRate * maxYrAppsNum);
+  }
+
+  // Yearly ceiling = per-cycle ceiling × cycles per year. This is arithmetic on
+  // two values the label states, not an inference (R22 keeps them independent,
+  // so it is only derived when BOTH inputs are present and Yr. is unstated).
+  const ccTotal = row["A.I. Max Total Rate/C.C. (lb a.i./A)"];
+  const ccPerYr = row["Max No. of CC/yr"];
+  if (row["A.I. Max Total Rate/Yr. (lb a.i./A)"] === NOT_SPECIFIED &&
+      ccTotal !== NOT_SPECIFIED && ccPerYr !== NOT_SPECIFIED) {
+    const base = parseFloat(ccTotal);
+    const n = parseInt(ccPerYr, 10);
+    if (isFinite(base) && isFinite(n) && n > 0) {
+      row["A.I. Max Total Rate/Yr. (lb a.i./A)"] = round3(base * n);
+    }
+  }
+
+  // Explicit annual AI cap from label text wins over computed yearly totals.
+  if (annualAiCap) {
+    row["A.I. Max Total Rate/Yr. (lb a.i./A)"] = annualAiCap;
+  }
+
+  // Annual AI-level caps belong in Additional Information
+  const cap = block.match(
+    /((?:Maximum|DO\s+NOT\s+apply\s+more\s+than)[^.;\n]{0,60}?per\s+(?:calendar\s+)?year[^.;\n]{0,120})/i);
+  const minVol = block.match(/(Minimum\s+Application\s+Volume:[^.;\n]{0,60})/i);
+  // The product rate in fl oz/A is kept verbatim alongside the converted value,
+  // so a reviewer can always recheck the arithmetic (unit-conversions.md rule 4).
+  const prodRate = block.match(
+    /Product\s+Rate\s*\(fl\s*oz\/A\)[^\d]{0,40}(\d+(?:\.\d+)?\s*(?:[-–]\s*\d+(?:\.\d+)?)?)/i);
+  const extra = [
+    prodRate && `Product Rate: ${prodRate[1].replace(/\s+/g, " ")} fl oz/A`,
+    cap && cap[1],
+    minVol && minVol[1]
+  ].filter(Boolean).join(" | ");
+  if (extra) row["Additional Information"] = extra.replace(/\s+/g, " ").trim();
+
+  // --- Restrictions, each routed to its own column ---
+  // Scope matters. A statement naming one crop or one state ("Only For Use in:
+  // Idaho, Oregon and Washington") belongs to the block it sits in; copying it
+  // onto every row is a fabrication. Only the product-wide statements —
+  // the NY/Nassau-Suffolk restriction, the drift table, the pollinator
+  // paragraph — may be applied to all rows.
+  if (doc.__restr === undefined) {
+    const geoProduct = allMatches(doc.fullText, FIELD_PATTERNS.geographicProduct);
+    const driftAll   = allMatches(doc.fullText, FIELD_PATTERNS.drift);
+    doc.__restr = {
+      geo:   geoProduct ? geoProduct.replace(/\s+/g, " ").trim() : null,
+      drift: driftAll ? driftAll.split(" ").length > 40 ? null : driftAll : null,
+      nont:  allMatches(doc.fullText, FIELD_PATTERNS.nonTarget)
+    };
+  }
+
+  // Block-specific geographic wording wins; otherwise the product-wide one.
+  const geoBlock = allMatches(block, FIELD_PATTERNS.geographic);
+  const geo   = geoBlock
+    ? (doc.__restr.geo ? `${doc.__restr.geo}; ${geoBlock}` : geoBlock)
+    : doc.__restr.geo;
+  const drift = allMatches(block, FIELD_PATTERNS.drift) || doc.__restr.drift;
+  const soil  = allMatches(block, FIELD_PATTERNS.soil);
+  const nont  = allMatches(block, FIELD_PATTERNS.nonTarget) || doc.__restr.nont;
+
+  if (geo)   row["Geographic Restrictions"] = geo;
+  if (drift) row["Drift Restrictions"] = drift;
+  if (nont)  row["On-field Non-target Species Restrictions"] = nont;
+  if (soil)  row["Soil Restrictions"] = soil;
+
+  // The NA decisions are NOT made here. They depend on App. Target and
+  // App. Type, and at this point in the run neither is settled: the
+  // authoritative App. Target comes from the section heading in
+  // parseDocument(), and App. Type may still be filled by deriveColumns().
+  // See finaliseRestrictionNA(), called once both are known.
+
+  const other = allMatches(block, [
+    /((?:DO\s+NOT\s+tank\s+mix[^.;\n]{0,180}|DO\s+NOT\s+graze[^.;\n]{0,140}|The\s+use\s+of\s+[A-Z][^.;\n]{0,180}prohibited[^.;\n]{0,80}|DO\s+NOT\s+apply\s+through\s+any[^.;\n]{0,100}))/gi
+  ]);
+  if (other) row["Additional Restrictions for Use/Use Site"] = other;
+
+  return row;
+}
+
+/* --- TASK 10 (R11) — confidence scoring ---------------------------
+   Scored on how much of the schema was matched from the label. A use
+   name alone is weak; rates plus intervals plus restrictions is strong.
+------------------------------------------------------------------ */
+const KEY_FIELDS = [
+  "App Rate (lb ai/A)",
+  "App. Target",
+  "App. Type",
+  "PHI (days)",
+  "REI"
+];
+
+function scoreRow(row) {
+  const ignore = new Set(["Use", "Product Name (PBN)", "Reg. #/File Sym", "Physical Form"]);
+  // R24 — a derived value is a convention, not label evidence, so it must not
+  // inflate confidence in how much of the label was actually read.
+  const derived = row.__derived || {};
+  const counts = c => !ignore.has(c) && !derived[c] && row[c] !== NOT_SPECIFIED;
+  const filled = SCHEMA.filter(counts).length;
+  const keyHits = KEY_FIELDS.filter(counts).length;
+  if (filled >= 8 && keyHits >= 3) return "High";
+  if (filled >= 4 && keyHits >= 1) return "Medium";
+  return "Low";
+}
+
+/** Maps a character offset in the joined full text back to a 1-based page number. */
+function pageForOffset(doc, offset) {
+  let cursor = 0;
+  for (let p = 0; p < doc.pages.length; p++) {
+    cursor += doc.pages[p].length + 2; // pages joined with "\n\n"
+    if (offset < cursor) return p + 1;
+  }
+  return doc.pages.length || 1;
+}
+
+/** Reads the Primary Brand Name from the label's opening pages. */
+function findProductName(text) {
+  const head = text.slice(0, 3000);
+  // PDF.js emits the whole page as one space-joined line, so the /m anchors in
+  // the previous version had no line starts to bind to beyond the very first —
+  // the same flaw as defect D6. These patterns are anchor-free and instead
+  // the brand name from the surrounding ALL-CAPS label text.
+  const m =
+    // "SIVANTO® 400 SL" — brand, symbol, then strength/formulation code.
+    head.match(/\b([A-Z][A-Za-z]{2,}\s*[®™]\s*\d{2,4}\s*[A-Z]{2,3})\b/)
+    // "SIVANTO® 400" or a bare "SIVANTO®"
+    || head.match(/\b([A-Z][A-Za-z]{2,}\s*[®™](?:\s*\d{2,4})?)/)
+    // Fall back to an ALL-CAPS name followed by a product-class word.
+    || head.match(/\b([A-Z][A-Z0-9\s\-]{3,40}?)\s+(?:Herbicide|Insecticide|Fungicide)\b/);
+  if (!m) return null;
+  // Collapse the space PDF.js inserts before the symbol: "SIVANTO ® 400 SL".
+  return m[1].replace(/\s+/g, " ").replace(/\s+([®™])/g, "$1").trim();
+}
+
+/* --- Use-section detection (R18, R20) ----------------------------
+   A Use Summary Table row is driven by a *use section*, not by every
+   mention of a crop name. Labels head each section with the use name
+  followed by the application target, e.g.
+     ALFALFA FOLIAR
+     BRASSICA (COLE) LEAFY VEGETABLES (Crop Group 5) SOIL
+     TREE NUTS (Crop Group 14-12) - EXCEPT ALMOND SOIL
+     CUCURBIT VEGETABLES (Crop Group 9) PLANTHOUSE
+------------------------------------------------------------------ */
+/* PDF.js joins page text with single spaces, so line breaks are not
+   available as anchors. Instead we locate the target keyword and walk
+   backwards over the preceding tokens, collecting those that look like
+   part of an ALL-CAPS heading. */
+const SECTION_TARGET_RE = /\b(FOLIAR|SOIL|PLANTHOUSE|IN-?FURROW|DRENCH|INJECTION|BANDED?)(?=\b|Crop\s+Group\b)/g;
+
+// Headings that look like sections but are not uses.
+const NOT_A_USE = /^(?:AND|OR|THE|FOR|SEE|NOTE|APPLY|APPLICATION|DIRECTIONS|SPECIFIC|CROP|USE|PEST|PRODUCT|RATE|TABLE|GROUP|INSECTICIDE|RESISTANCE|MANAGEMENT|STORAGE|DISPOSAL|PRECAUTIONARY|RESTRICTIONS?|INFORMATION|IRAC|EPA|SIVANTO|GENERAL|MIXING|SPRAY|CHEMIGATION|AERIAL|GROUND|INJECTION|DRENCH|BROADCAST)\b/;
+
+/** True when a token can form part of an ALL-CAPS use heading. */
+function isHeadingToken(tok) {
+  if (!tok) return false;
+  if (/^\d{1,2}$/.test(tok)) return true;              // footnote marker
+  if (/^[-–&\/]+$/.test(tok)) return true;             // joiners
+  if (/^\[\*\]$/.test(tok)) return true;             // label bullet marker
+  if (/^(?:and|or)$/i.test(tok)) return true;           // multi-group headings
+  if (/^[A-Z][a-z]+$/.test(tok)) return true;          // Title-case headings (e.g., Plenexos)
+  if (/^[A-Z][A-Za-z0-9®™'&.,\/()\-–]{1,}$/.test(tok)) return true;
+  return /^[A-Z0-9®™'&.,\/()\-–]+$/.test(tok) && /[A-Z]/.test(tok);
+}
+
+/**
+ * Walks backwards from the target keyword and returns the heading text.
+ * Everything inside parentheses is accepted verbatim, because group codes
+ * such as "(Crop Group 5)" contain lowercase words.
+ */
+function headingBefore(text, keywordStart) {
+  const before = text.slice(Math.max(0, keywordStart - 240), keywordStart);
+  const toks = before.split(/\s+/).filter(Boolean);
+  const kept = [];
+  let depth = 0;
+  let group = [];            // tokens collected inside an open parenthesis
+  /* Only tokens OUTSIDE parentheses count against the heading cap below.
+     Group codes are already bounded by their own `group.length > 8` limit,
+     and a heading may legitimately carry several of them — e.g. "CEREAL
+     GRAINS (Crop Group 15), FORAGE, FODDER AND STRAW OF CEREAL GRAINS
+     (Crop Group 16) AND QUINOA (including production for seed)". Counting
+     the codes truncated that heading to its last clause. */
+  let words = 0;
+  for (let i = toks.length - 1; i >= 0; i--) {
+    const tok = toks[i];
+    const opens = (tok.match(/\(/g) || []).length;
+    const closes = (tok.match(/\)/g) || []).length;
+
+    // A self-contained token such as "Day(s)" is not a group code — judge it
+    // on its own merits so it can terminate the walk.
+    const selfContained = depth === 0 && opens === closes;
+
+    if (!selfContained && depth > 0) {
+      group.unshift(tok);
+      depth += closes - opens;
+      // Group codes are short. A long run means we have run into body prose
+      // such as a member-crop list, so stop before it.
+      if (group.length > 8) break;
+      if (depth <= 0) { kept.unshift(...group); group = []; depth = 0; }
+      continue;
+    }
+    if (!selfContained && closes > opens) {
+      group = [tok];
+      depth = closes - opens;
+      continue;
+    }
+    if (!isHeadingToken(tok)) break;
+    kept.unshift(tok);
+    if (++words > 30) break;
+  }
+  return kept.join(" ");
+}
+
+/** Normalises a captured term such as "drench" / "foliar" to "Drench". */
+function titleCaseTerm(v) {
+  if (!v || v === NOT_SPECIFIED) return v;
+  return v.replace(/\b[a-z]/g, c => c.toUpperCase());
+}
+
+/**
+ * Interval columns are counted in days, so "10 Day(s)" and "10" are the same
+ * value. Conditional wording is left whole (R21).
+ */
+function normaliseDays(v) {
+  if (!v || v === NOT_SPECIFIED) return v;
+  const m = String(v).trim().match(/^(\d+(?:\.\d+)?)\s*Day\(?s?\)?\.?$/i);
+  return m ? m[1] : v;
+}
+
+/** Normalises REI text to 'N hours'. */
+function normaliseRei(v) {
+  if (!v || v === NOT_SPECIFIED) return v;
+  const m = String(v).trim().match(/^(\d+(?:\.\d+)?)\s*(?:hour\(s\)|hr\(s\)|hours?|hrs?)\.?$/i);
+  return m ? `${m[1]} hours` : v;
+}
+
+/** Keeps pest-timing phrasing canonical in App. Timing (other). */
+function normaliseTimingOther(v) {
+  if (!v || v === NOT_SPECIFIED) return v;
+  if (/(when\s+pests?\s+(?:are\s+first\s+detected|occur)|early\s+in\s+the\s+infestation|(?:as\s+the\s+)?(?:pest\s+)?population\s+reaches\s+treatment\s+threshold(?:s)?)/i.test(String(v))) {
+    return "when pests occur";
+  }
+  return v;
+}
+
+/** Upper-cases the first alphabetic character in a sentence-like value. */
+function capitaliseSentenceStart(v) {
+  if (!v || v === NOT_SPECIFIED || v === NOT_APPLICABLE) return v;
+  return String(v).replace(/^([^A-Za-z]*)([A-Za-z])/, (_, lead, ch) => `${lead}${ch.toUpperCase()}`);
+}
+
+/** Chooses the more informative equipment sentence when both block and doc matches exist. */
+function pickEquipmentValue(blockEquip, docEquip) {
+  const local = String(blockEquip || "").trim();
+  const global = String(docEquip || "").trim();
+  if (!local) return global || null;
+  if (!global) return local;
+  const localNorm = local.toLowerCase();
+  const globalNorm = global.toLowerCase();
+  const localGenericAircraft = /fixed\s+or\s+rotary\s+winged\s+aircraft/.test(localNorm) &&
+    !/(air-?blast|airblast|ground\s+equipment|ground\s+sprayer)/.test(localNorm);
+  const localHasGroundContext = /(similar\s+ground\s+equipment|ground\s+sprayers?|air-?blast|airblast)/.test(localNorm);
+  const globalHasGroundContext = /(similar\s+ground\s+equipment|ground\s+sprayers?|air-?blast|airblast)/.test(globalNorm);
+  const globalRicher = global.length > local.length + 12 &&
+    /(air-?blast|airblast|ground\s+equipment|ground\s+sprayers?)/.test(globalNorm);
+  if (localHasGroundContext && !globalHasGroundContext) return local;
+  if (localGenericAircraft && globalRicher) return global;
+  if (globalNorm.includes(localNorm) && global.length > local.length) return global;
+  return local;
+}
+
+/** Trailing footnote markers on a heading, e.g. "CLOVER 1 FOLIAR". */
+function cleanUseName(name) {
+  return name
+    .replace(/\s+/g, " ")
+    .replace(/\[\*\]/g, "")               // strip label table markers
+    .replace(/^(?:\d{1,3}\s+)+/, "")        // leading page / footnote numbers
+    .replace(/^\d+\s*Day\(s\)\s*/i, "")     // spill from a preceding PHI cell
+    .replace(/^(?:\d{1,3}\s+)+/, "")
+    .replace(/\s*\d+\s*$/, "")              // trailing footnote digit
+    .replace(/[,;.\-–]+$/, "")
+    .trim();
+}
+
+/* N5 — how far the final use section may run when there is no following
+   heading to stop it. Every use block in the SIVANTO label sits well under
+   this; the cap only exists so a label whose back matter is worded
+   unexpectedly cannot pull the whole remainder of the document into the last
+   row's fields. Raise it only if a real label is found with a longer final
+   block — and check the BACK_MATTER pattern first, since a runaway section
+   usually means that pattern missed, not that the cap is too tight. */
+const FINAL_SECTION_MAX_CHARS = 2500;
+
+/**
+ * Some seed-treatment labels list uses as crop blocks ending in
+ * "Pest Controlled" rather than "<CROP> FOLIAR/SOIL" headings.
+ */
+function findSeedTreatmentSections(text) {
+  const out = [];
+  const seen = new Set();
+  const re = /\b(?:SPECIFIC\s+CROP\s+DIRECTIONS\s+)?((?:[A-Z][A-Za-z0-9®™'\/\-–]*|\([^)]{1,120}\))(?:\s+(?:[A-Z][A-Za-z0-9®™'\/\-–]*|\([^)]{1,120}\)|and|or|including))*?)\s+Pests?\s+Controlled\b/g;
+
+  for (const m of text.matchAll(re)) {
+    const raw = (m[1] || "").replace(/\s+/g, " ").trim();
+    const name = cleanUseName(raw);
+    if (name.length < 3) continue;
+    if (NOT_A_USE.test(name)) continue;
+    if (!/[A-Za-z]{3}/.test(name)) continue;
+
+    const key = name + "||SEED TREATMENT";
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const whole = m[0] || "";
+    const rel = Math.max(0, whole.indexOf(m[1] || ""));
+    out.push({
+      useName: name,
+      target: "SEED TREATMENT",
+      start: m.index + rel,
+      detector: "seed-table"
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Generic fallback for labels that use all-caps use headings but do not
+ * include an explicit trailing target keyword.
+ */
+function findGenericAllCapsSections(text) {
+  const out = [];
+  const seen = new Set();
+  const re = /\b(?:SPECIFIC\s+CROP\s+DIRECTIONS\s+)?((?:\[\*\]\s*)?(?:[A-Z][A-Za-z0-9®™'\/\-–]*|\([^)]{1,120}\))(?:\s+(?:\[\*\]\s*)?(?:[A-Z][A-Za-z0-9®™'\/\-–]*|\([^)]{1,120}\)|and|or|including|except))*?)\s+Pests?\s+Controlled\b/g;
+
+  for (const m of text.matchAll(re)) {
+    const raw = (m[1] || "").replace(/\s+/g, " ").trim();
+    const name = cleanUseName(raw);
+    if (name.length < 3) continue;
+    if (NOT_A_USE.test(name)) continue;
+    if (!/[A-Za-z]{3}/.test(name)) continue;
+
+    const key = name + "||GENERIC";
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const whole = m[0] || "";
+    const rel = Math.max(0, whole.indexOf(m[1] || ""));
+    out.push({
+      useName: name,
+      target: "GENERIC",
+      start: m.index + rel,
+      detector: "generic-pest-table"
+    });
+  }
+  return out;
+}
+
+/** Finds every use section in the label, with its text span. */
+function findUseSections(text) {
+  const found = [];
+  let lastKey = null;
+  for (const m of text.matchAll(SECTION_TARGET_RE)) {
+    const raw = headingBefore(text, m.index);
+    const name = cleanUseName(raw);
+    if (name.length < 3) continue;
+    if (NOT_A_USE.test(name)) continue;
+    if (!/[A-Za-z]{3}/.test(name)) continue;
+
+    const target = m[1].toUpperCase();
+    const key = name + "||" + target;
+    if (key === lastKey) continue;   // heading repeated across a page break
+    lastKey = key;
+
+    found.push({
+      useName: name,
+      target,
+      start: Math.max(0, m.index - raw.length),
+      detector: "target-heading"
+    });
+  }
+
+  // Fallback for seed-treatment labels that do not use FOLIAR/SOIL headings.
+  if (!found.length && /\bseed\s+treatment\b/i.test(text)) {
+    found.push(...findSeedTreatmentSections(text));
+  }
+
+  // Last fallback: generic all-caps crop/use headings ending in "Pest Controlled".
+  if (!found.length) {
+    found.push(...findGenericAllCapsSections(text));
+  }
+
+  // Slice each section up to the start of the next one. The final section is
+  // capped at the label's back matter, otherwise STORAGE AND DISPOSAL and the
+  // warranty text bleed into the last use's fields.
+  const BACK_MATTER = /\b(?:STORAGE\s+AND\s+DISPOSAL|CONDITIONS\s+OF\s+SALE|WARRANTY|NOTICE\s+TO\s+BUYER)\b/;
+  return found.map((s, i) => {
+    let end = i + 1 < found.length
+      ? found[i + 1].start
+      : Math.min(text.length, s.start + FINAL_SECTION_MAX_CHARS);
+    const tail = text.slice(s.start, end);
+    const cut = tail.search(BACK_MATTER);
+    if (cut > 0) end = s.start + cut;
+    return { ...s, end };
+  });
+}
+
+/* --- Convention-derived columns (R24) -----------------------------
+   Use Site, App. Type and App. Timing (Site Status) are rarely printed
+   verbatim, but analysts fill them by applying a settled convention to
+   the application prose. The convention lives in
+   knowledge/derivation-rules.md; this is its executable form.
+
+   Every rule requires evidence IN THE LABEL. No evidence, no value —
+   the cell stays NS. Each firing is recorded on the row so a reviewer
+   can trace it, which is what keeps this compatible with R19.
+------------------------------------------------------------------ */
+const has = (t, re) => re.test(t);
+
+/** D1 — Use Site. */
+function deriveUseSite(block, target, headingTarget) {
+  if (headingTarget === "PLANTHOUSE") return ["Planthouse", "D1.1"];
+  if (has(block, /\bgreenhouses?\b|greenhouse-grown/i) &&
+      !has(block, /not\s+for\s+use\s+in\s+greenhouses?/i)) {
+    return ["Greenhouse (Indoor)", "D1.2"];
+  }
+  if (has(block, /\blawns?\b|\bresidential\b|around\s+homes/i)) {
+    return ["Residential (Outdoor)", "D1.3"];
+  }
+  // D1.4 — a per-acre rate plus field equipment means an outdoor field use.
+  const perAcre = has(block, /fl\s*oz\/A\b|Gallons?\s*\/?\s*Acre|per\s+acre\b|\blb\s*a\.?i\.?\/A/i);
+  const fieldKit = has(block, /\baerial\b|aircraft|ground\s+boom|ground\s+sprayers?|chemigation/i);
+  if (perAcre && fieldKit) return ["Agricultural (Outdoor)", "D1.4"];
+  return [null, null];
+}
+
+/** D2 — App. Type. Several may apply; kept in the label's own order. */
+const APP_TYPE_RULES = [
+  { id: "D2.2", target: "Foliar", re: /\bbanded?\b|band\s+application/i, value: "Banded" },
+  { id: "D2.3", target: "Foliar", re: /\bdirected\s+spray\b/i, value: "Directed Spray" },
+  { id: "D2.3", target: "Foliar", re: /\bshielded\s+spray\b/i, value: "Shielded Spray" },
+  { id: "D2.4", target: "Soil", re: /\bchemigation\b|\bdrip\b|\btrickle\b|micro-?sprinkler/i, value: "Chemigation" },
+  { id: "D2.5", target: "Soil", re: /\binject(?:ion|ed)?\b/i, value: "Injection" },
+  { id: "D2.6", target: "Soil", re: /\bin-?furrow\b/i, value: "In-furrow spray" },
+  { id: "D2.7", target: "Soil", re: /\bdrench\b/i, value: "Drench" },
+  { id: "D2.8", target: "Soil", re: /\bside-?dress\b/i, value: "Side-dress" }
+];
+
+function deriveAppType(block, target) {
+  if (target === "Seed Treatment") return ["Seed Treatment", "D2.9"];
+  const hits = [];
+  const ids = [];
+  for (const r of APP_TYPE_RULES) {
+    if (r.target !== target) continue;
+    if (!has(block, r.re)) continue;
+    if (!hits.includes(r.value)) { hits.push(r.value); ids.push(r.id); }
+  }
+  // D2.1 — an over-the-field foliar spray is a broadcast application.
+  if (isFoliarLikeTarget(target)) {
+    const broadcast = has(block, /\bbroadcast\b/i) ||
+      has(block, /\b(?:ground\s+sprayers?|ground\s+boom|aircraft|aerial)\b/i);
+    if (broadcast && !hits.includes("Broadcast")) {
+      hits.unshift("Broadcast"); ids.unshift("D2.1");
+    }
+  }
+  return hits.length ? [hits.join(", "), ids.join("+")] : [null, null];
+}
+
+/** D3 — App. Timing (Site Status). All rules are block-scoped. */
+function deriveTimingStatus(block, target) {
+  const pre  = has(block, /\bpre-?emergen(?:ce|t)\b/i);
+  const post = has(block, /\bpost-?emergen(?:ce|t)\b/i);
+  if (pre && post) return ["Pre-emergence/ Post-emergence", "D3.1"];
+  if (pre)  return ["Pre-emergence", "D3.2"];
+  if (post) return ["Post-emergence", "D3.3"];
+
+  // D3.8 (pre-transplant) was added here and has been REMOVED. It read the
+  // plant-house wording "24 hours to 7 days prior to transplanting" and
+  // returned "Pre-transplant". The repository golden supports that; the
+  // analyst's pasted golden records "Post-emergence" on the same two
+  // plant-house rows. The two reference files disagree, so there is no
+  // evidence for the rule — only a choice between sources — and a rule that
+  // fires on a contested reading produces a confident wrong answer on the two
+  // rows it touches. It stays out until the authoritative golden is settled.
+  // See Task 46. Do not reinstate without checking which file won.
+
+  const atPlant = has(block, /\bat\s*-?\s*planting\b|prior\s+to\s+planting|before\s+planting/i);
+  const transpl = has(block, /\bpost\s*-?\s*transplant\b|at\s*-?\s*transplant(?:ing)?\b|potting\s+hole/i);
+  if (atPlant && transpl) return ["At-planting / Post-transplant", "D3.6"];
+  if (atPlant) return ["At-planting", "D3.4"];
+  if (transpl) return ["Post-transplant", "D3.5"];
+
+  if (has(block, /tray\s+drench|seedlings?\s+in\s+trays|potting\s+media|high-?volume\s+foliar\s+spray|overhead\s+irrigation\s+wash/i)) {
+    return ["Post-emergence", "D3.10"];
+  }
+
+  // D3.9 — a soil treatment aimed at an ALREADY-STANDING plant is
+  // post-emergence, for the same reason a foliar spray is: you cannot drench
+  // the base of a trunk, or inject between the trunk and the drip line of a
+  // canopy, unless the crop is up and established. The evidence is the
+  // placement wording, not the word "post-emergence", which perennial-crop
+  // soil blocks (citrus, stone fruit, vine) never print.
+  if (has(block, /\bbasal\s+drench\b|\bdrip\s+line\b|tree\s+canopy|\btrunk\b|established\s+plant/i)) {
+    return ["Post-emergence", "D3.9"];
+  }
+
+  // D3.7 — a foliar spray onto a standing crop is post-emergence by definition.
+  // This rule reasons from the situation, not from a phrase: the evidence it
+  // needs is that the label puts this use under a FOLIAR heading, which the
+  // section parser has already established. It previously also demanded pest
+  // wording in the block; that condition was never load-bearing for the
+  // inference, and because SIVANTO states its pest timing once in the general
+  // directions rather than per block, it emptied the column on every row but
+  // one (D22). A foliar application is post-emergence whether or not the block
+  // repeats why it is being sprayed.
+  if (isFoliarLikeTarget(target)) {
+    return ["Post-emergence", "D3.7"];
+  }
+  return [null, null];
+}
+
+/**
+ * Fills the three convention-derived columns, recording which rule fired.
+ * Values already read verbatim from the label are never overwritten.
+ */
+function deriveColumns(row, block, headingTarget) {
+  const derived = {};
+  const target = row["App. Target"];
+
+  if (row["Use Site"] === NOT_SPECIFIED) {
+    const [v, id] = deriveUseSite(block, target, headingTarget);
+    if (v) { row["Use Site"] = v; derived["Use Site"] = id; }
+  }
+  if (row["App. Type"] === NOT_SPECIFIED) {
+    const [v, id] = deriveAppType(block, target);
+    if (v) { row["App. Type"] = v; derived["App. Type"] = id; }
+  }
+  if (row["App. Timing (Site Status)"] === NOT_SPECIFIED) {
+    const [v, id] = deriveTimingStatus(block, target);
+    if (v) { row["App. Timing (Site Status)"] = v; derived["App. Timing (Site Status)"] = id; }
+  }
+  row.__derived = derived;
+  return row;
+}
+
+/* --- App. Timing (other) product-wide fallback (R19, R21) ---------
+   Runs from parseDocument() for the same reason finaliseRestrictionNA()
+   does: it keys off App. Target, which is not authoritative until the
+   section heading has been applied. Placing it in rowFromBlock() would
+   read a field that is still unset — the D18 ordering defect.
+
+   Scope history — three attempts, the first two wrong in opposite
+   directions and the third wrong on a false premise:
+     Task 33 applied the sentence unconditionally (D17).
+     Task 35 required pest wording in the block, which SIVANTO states
+       once in the general directions and never repeats, so 42 of 43
+       rows went empty (D22).
+     Task 39 restricted it to foliar rows, on the assumption that soil
+       applications have no pest-driven timing. The golden example
+       disproves that: it fills this column on ALL 43 rows, soil and
+       planthouse included, because the timing describes when the
+       product is applied, not how (D25).
+   So the fallback is document-wide again — but this is not a return to
+   Task 33. What made Task 33 wrong was overwriting rows that stated
+   their own timing; the guard on the first line is what prevents that,
+   and it is the guard, not the target test, that enforces R19.
+
+   Two tiers, most authoritative first: the block's own wording, then
+   the label's product-wide sentence. If neither exists, the field
+   remains NS per R19.
+------------------------------------------------------------------ */
+function finaliseTimingOther(row, doc) {
+  if (row["App. Timing (other)"] !== NOT_SPECIFIED) return row;
+  if (doc.__timingOther) {
+    // Still the label's own words, just found outside this use block.
+    row["App. Timing (other)"] = doc.__timingOther;
+  }
+  return row;
+}
+
+/* --- Restriction NA decisions (R7, Task 28) -----------------------
+   Split out of rowFromBlock() because of an ordering defect: that
+   function runs BEFORE parseDocument() applies the authoritative
+   App. Target from the section heading, and before deriveColumns()
+   fills App. Type. Both NA rules read exactly those two fields, so
+   they were testing values that had not been assigned yet — App. Type
+   was still NS on most rows, and App. Target held whatever casing the
+   block regex happened to capture, which a strict === "Foliar" test
+   silently failed. The result was that NOT_APPLICABLE, which Task 28
+   recorded as implemented, never once appeared in the output.
+
+   Comparison is case-insensitive now: the block may print "foliar" and
+   the heading "FOLIAR", and neither should decide a column by accident.
+------------------------------------------------------------------ */
+function finaliseRestrictionNA(row) {
+  const target = String(row["App. Target"] || "").toLowerCase();
+  const type   = String(row["App. Type"] || "").toLowerCase();
+
+  // A foliar application has no soil restriction to state — that is "not
+  // applicable" rather than "not stated". Only fill a cell the label left
+  // empty; a real soil statement found in the block always wins.
+  if (row["Soil Restrictions"] === NOT_SPECIFIED && isFoliarLikeTarget(target)) {
+    row["Soil Restrictions"] = NOT_APPLICABLE;
+  }
+  // Drift likewise cannot apply to a soil drench, injection or in-furrow spray.
+  if (row["Drift Restrictions"] === NOT_SPECIFIED && target === "soil" &&
+      /drench|injection|in-?furrow/.test(type)) {
+    row["Drift Restrictions"] = NOT_APPLICABLE;
+  }
+  if (target === "seed treatment") {
+    if (row["Drift Restrictions"] === NOT_SPECIFIED) row["Drift Restrictions"] = NOT_APPLICABLE;
+    if (row["Soil Restrictions"] === NOT_SPECIFIED) row["Soil Restrictions"] = NOT_APPLICABLE;
+  }
+  return row;
+}
+
+/**
+ * Parses one document into schema rows.
+ * One row = one use + one use site + one application method (R18), so a crop
+ * with both a foliar and a soil application yields two rows.
+ */
+function parseDocument(doc) {
+  const text = doc.fullText;
+  doc.productName = findProductName(text);
+
+  const rows = [];
+  const seen = new Map();
+  const filled = r => SCHEMA.filter(c => r[c] !== NOT_SPECIFIED).length;
+
+  for (const sec of findUseSections(text)) {
+    const block = text.slice(sec.start, sec.end);
+    const row = rowFromBlock(sec.useName, block, doc);
+
+    // The heading's own keyword is authoritative for the application method.
+    if (sec.target === "PLANTHOUSE") {
+      row["Use Site"] = "Planthouse";
+      // Analyst-authoritative SIVANTO rows classify these tray/seedling uses as
+      // foliar-targeted even when drench language is also present.
+      row["App. Target"] = "Foliar";
+    } else if (sec.target === "SEED TREATMENT") {
+      row["App. Target"] = "Seed Treatment";
+      row["App. Type"] = "Seed Treatment";
+    } else if (sec.target === "IN-FURROW") {
+      row["App. Target"] = "Soil";
+      row["App. Type"] = "In-Furrow";
+    } else if (sec.target === "INJECTION") {
+      row["App. Target"] = "Soil";
+      row["App. Type"] = "Injection";
+    } else if (sec.target === "DRENCH") {
+      row["App. Target"] = "Soil";
+      row["App. Type"] = "Drench";
+    } else if (sec.target === "BANDED") {
+      row["App. Target"] = "Foliar";
+      row["App. Type"] = "Banded";
+    } else if (sec.target === "BAND") {
+      row["App. Target"] = "Foliar";
+      row["App. Type"] = "Banded";
+    } else if (sec.target === "GENERIC") {
+      // Keep whatever the block explicitly states; if none, leave NS.
+      row["App. Target"] = titleCaseTerm(row["App. Target"]);
+    } else {
+      if (sec.target === "FOLIAR") {
+        const specificTarget = canonicalizeAppTarget(row["App. Target"]);
+        const hasFoliageEvidence = /\bfoliage\b[^.;\n]{0,30}\bplant\b|\bcrop\s+foliage\b/i.test(block) || /\bcrop\s+foliage\b/i.test(text);
+        if (specificTarget !== NOT_SPECIFIED && !(/^Foliar$/i.test(String(specificTarget)) && hasFoliageEvidence)) {
+          row["App. Target"] = specificTarget;
+        } else if (hasFoliageEvidence) {
+          row["App. Target"] = "Foliage/Plant";
+        } else {
+          row["App. Target"] = "Foliar";
+        }
+      } else {
+        row["App. Target"] = "Soil";
+      }
+    }
+    row["App. Target"] = canonicalizeAppTarget(row["App. Target"]);
+    row["App. Type"] = titleCaseTerm(row["App. Type"]);
+
+    // R24 — fill the convention-derived columns now that App. Target is settled.
+    deriveColumns(row, block, sec.target);
+    finaliseSeedTreatmentRow(row, block, text);
+
+    // Both NA rules depend on App. Target and App. Type, so they run last.
+    finaliseTimingOther(row, doc);
+    finaliseRestrictionNA(row);
+
+    // Keep sentence-like fields presentation-ready for table and export.
+    row["App. Equipment"] = capitaliseSentenceStart(row["App. Equipment"]);
+    row["App. Timing (other)"] = capitaliseSentenceStart(row["App. Timing (other)"]);
+    row["App. Timing (Site Status)"] = capitaliseSentenceStart(row["App. Timing (Site Status)"]);
+
+    row["Page"] = String(pageForOffset(doc, sec.start));
+    row["Source File"] = doc.fileName;
+    row.__source = block.replace(/\s+/g, " ").trim().slice(0, 1200);
+    row["Confidence"] = scoreRow(row);
+
+    // R18 — one row per use + use site + application method
+    const key = [
+      row["Use"], row["Use Site"], row["App. Target"], row["App. Type"]
+    ].join("||");
+    if (seen.has(key)) {
+      const existing = seen.get(key);
+      if (filled(row) > filled(existing)) {
+        rows[rows.indexOf(existing)] = row;
+        seen.set(key, row);
+      }
+      continue;
+    }
+    seen.set(key, row);
+    rows.push(row);
+  }
+
+  // 3. Nothing detected? Still emit one compliant row so output is never empty.
+  if (!rows.length) {
+    const fallback = blankRow();
+    fallback["Additional Information"] = "No use entries detected in this document.";
+    fallback["Page"] = "1";
+    fallback["Confidence"] = "Low";
+    fallback["Source File"] = doc.fileName;
+    fallback.__source = "";
+    fallback.__derived = {};
+    rows.push(fallback);
+  }
+
+  rows.sort((a, b) =>
+    String(a["Use"]).localeCompare(String(b["Use"])) ||
+    String(a["App. Target"]).localeCompare(String(b["App. Target"])));
+  rows.forEach((r, i) => { r.__id = `${doc.fileName}#${i}`; });
+  return rows;
+}
+
+/* --- TASK 11 (R13) — coverage warnings ----------------------------
+   Two distinct gaps, both of which the reviewer needs to see:
+
+   1. A crop that produced a row, but the row is nearly empty.
+   2. A crop NAMED IN THE LABEL that produced no row at all.
+
+   (2) is the more dangerous of the pair and was previously undetected:
+   it is exactly the failure behind defects D1 (304 rows from crop
+   mentions) and D6 (1 row when section matching silently broke). A
+   parser that stops finding sections produces a short, clean-looking
+   table with no visible sign anything is missing. Cross-checking the
+   crop vocabulary against the label text is what makes that visible.
+------------------------------------------------------------------ */
+function missingCropWarnings(rows, documents) {
+  if (!documents || !documents.length) return [];
+  const warnings = [];
+  const covered = [...new Set(rows.map(r => String(r["Use"]).toLowerCase()))];
+
+  documents.forEach(doc => {
+    const text = doc.fullText || "";
+
+    /* Labels head a section with a crop GROUP and then list its member crops
+       inside the body — "BRASSICA (COLE) LEAFY VEGETABLES (Crop Group 5)"
+       is followed by Broccoli, Cabbage, Kale and the rest. Those members are
+       correctly represented by the group's row, so a bare "is this crop name
+       present in the document" test reports every one of them as missing.
+       That is the same mistake the section-detection comment above warns
+       against, applied in reverse: it inflates the warning panel instead of
+       the table, and 157 false alarms hide any real one.
+
+       A mention only signals a gap when it falls OUTSIDE every use section
+       we detected — i.e. the crop is named somewhere the parser never turned
+       into a row. Sections are recomputed here rather than passed in, so the
+       check cannot drift from what the parser actually matched. */
+    const spans = findUseSections(text);
+    const insideASection = i => spans.some(s => i >= s.start && i < s.end);
+
+    CROP_TERMS_SORTED.forEach(term => {
+      const t = term.toLowerCase();
+      // Already represented if any row's Use contains the term, or vice versa
+      // (the label may write "TREE NUTS (Crop Group 14-12)" for "Tree Nut").
+      if (covered.some(use => use.includes(t) || t.includes(use))) return;
+
+      // Word-boundary match so "Pea" does not fire on "Peanut". Every
+      // occurrence is checked: a crop named once in the ingredient blurb and
+      // again inside a real section is covered, not missing.
+      const re = new RegExp(String.raw`\b${ESC(term)}s?\b`, "gi");
+      const hits = [...text.matchAll(re)];
+      if (!hits.length) return;
+      if (hits.some(h => insideASection(h.index))) return;
+
+      warnings.push({
+        crop: term,
+        rows: 0,
+        pages: String(pageForOffset(doc, hits[0].index)),
+        detail: "named in the label but no use section was extracted for it — the parser may have missed a section"
+      });
+    });
+  });
+  return warnings;
+}
+
+function coverageWarnings(rows, documents) {
+  const warnings = [];
+  const byCrop = new Map();
+  rows.forEach(r => {
+    if (!byCrop.has(r["Use"])) byCrop.set(r["Use"], []);
+    byCrop.get(r["Use"]).push(r);
+  });
+  byCrop.forEach((cropRows, crop) => {
+    const best = Math.max(...cropRows.map(r =>
+      SCHEMA.filter(c => c !== "Use" && r[c] !== NOT_SPECIFIED).length));
+    if (best <= 2) {
+      warnings.push({
+        crop,
+        rows: cropRows.length,
+        pages: [...new Set(cropRows.map(r => r["Page"]))].join(", "),
+        detail: best === 0
+          ? "no use details found — crop name detected only"
+          : "only one field matched"
+      });
+    }
+  });
+  warnings.push(...missingCropWarnings(rows, documents));
+  return warnings.sort((a, b) => a.crop.localeCompare(b.crop));
+}
+
+/* ------------------------------------------------------------------
+   TASK 5 — Render the Use Summary Table on screen
+   Grouped by source file, scrollable, with a live search filter.
+------------------------------------------------------------------ */
+const resultsEl     = document.getElementById("results");
+const placeholderEl = document.getElementById("resultsPlaceholder");
+const statsEl       = document.getElementById("stats");
+const warningsEl    = document.getElementById("warnings");
+const groupsEl      = document.getElementById("groups");
+const searchEl      = document.getElementById("search");
+const confFilterEl  = document.getElementById("confFilter");
+const downloadBtn   = document.getElementById("downloadBtn");
+const qcGateEl      = document.getElementById("qcGate");
+const qcGateIconEl  = document.getElementById("qcGateIcon");
+const qcGateTextEl  = document.getElementById("qcGateText");
+const qcDefectsEl   = document.getElementById("qcDefects");
+const reviewGateEl  = document.getElementById("reviewGate");
+const reviewStageTitleEl = document.getElementById("reviewStageTitle");
+const reviewStageTextEl = document.getElementById("reviewStageText");
+const reviewStageBodyEl = document.getElementById("reviewStageBody");
+const reviewGateNoteEl = document.getElementById("reviewGateNote");
+const reviewYesBtn = document.getElementById("reviewYesBtn");
+const reviewNoBtn = document.getElementById("reviewNoBtn");
+const reviewResumeBtn = document.getElementById("reviewResumeBtn");
+const reviewRerunBtn = document.getElementById("reviewRerunBtn");
+const jumpBackWrapEl = document.getElementById("jumpBackWrap");
+const jumpBackBtn = document.getElementById("jumpBackBtn");
+
+let allRows = [];   // every parsed row, across all files
+let reviewFlow = null;
+let jumpContext = null;
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function highlight(value, term) {
+  const safe = esc(value);
+  if (!term) return safe;
+  return safe.replace(new RegExp(`(${ESC(term)})`, "gi"), "<mark>$1</mark>");
+}
+
+function renderStats(rows) {
+  const files  = new Set(rows.map(r => r["Source File"])).size;
+  const crops  = new Set(rows.map(r => r["Use"])).size;
+  const uses   = new Set(rows.map(r =>
+    `${r["Use"]}||${r["Use Site"]}||${r["App. Target"]}||${r["App. Type"]}`)).size;
+  const low    = rows.filter(r => r["Confidence"] === "Low").length;
+  statsEl.innerHTML = [
+    [files, "Labels processed"],
+    [crops, "Unique uses"],
+    [uses,  "Use / method combinations"],
+    [rows.length, "Total rows"],
+    [low, "Low-confidence rows"]
+  ].map(([n, label]) => `<div class="stat"><b>${n}</b><span>${label}</span></div>`).join("");
+}
+
+function renderQcGateReport(report) {
+  qcGateEl.style.display = "flex";
+  const blocked = !report.passed;
+  qcGateEl.classList.toggle("error", blocked);
+  qcGateIconEl.textContent = blocked ? "⛔" : "✔";
+  qcGateTextEl.textContent = blocked
+    ? `QC blocked automatic result display: ${report.defects.length} issue(s) found (${report.counts.Critical || 0} Critical, ${report.counts.High || 0} High).`
+    : `QC passed: ${report.checkedRows} row(s) checked with no Critical/High issues.`;
+
+  if (report.remediation && report.remediation.applied > 0) {
+    qcGateTextEl.textContent += ` Auto-remediation applied ${report.remediation.applied} fix(es).`;
+  }
+
+  if (!report.defects.length) {
+    qcDefectsEl.style.display = "none";
+    qcDefectsEl.innerHTML = "";
+    return;
+  }
+
+  qcDefectsEl.style.display = "block";
+  qcDefectsEl.innerHTML = `
+    <h4>QC defects</h4>
+    <ul>${report.defects.map(d =>
+      `<li><b>${esc(d.severity)}</b> · ${esc(d.code)} — ${esc(d.message)}${d.jumpLabel ? ` <button class="ghost small-target" type="button" data-qc-jump="${esc(d.code)}">${esc(d.jumpLabel)}</button>` : ""}</li>`
+    ).join("")}</ul>`;
+
+  if (report.remediation && report.remediation.applied > 0) {
+    qcDefectsEl.innerHTML += `
+      <h4>Auto-remediation</h4>
+      <ul>${report.remediation.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>`;
+  }
+}
+
+function canonicalizeAppTarget(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw || raw === NOT_SPECIFIED.toLowerCase()) return value;
+  if (/^foliage\s*\/\s*plant(?:\s*\(weeds\))?$/.test(raw)) return "Foliage/Plant";
+  if (/^fo?li?a?r$/.test(raw)) return "Foliar";
+  if (/^soil$/.test(raw)) return "Soil";
+  if (/^seed\s*treatment$/.test(raw)) return "Seed Treatment";
+  return value;
+}
+
+  function isFoliarLikeTarget(target) {
+    const raw = String(target || "").trim();
+    return /^Foliar$/i.test(raw) || /^Foliage\s*\/\s*Plant(?:\s*\(Weeds\))?$/i.test(raw);
+  }
+
+function inferTargetFromEvidence(text) {
+  const hasSeed = /\bseed\s+treatment\b|seed\s+applied|seed\s+piece/i.test(text);
+  const hasSoil = /\bsoil\b|\bdrench\b|in-?furrow|\binject(?:ion|ed)?\b|\bdrip\b|\btrickle\b|\bchemigation\b|side-?dress|basal/i.test(text);
+  const hasFoliar = /\bfoliar\b|\baerial\b|aircraft|ground\s+sprayers?|ground\s+boom|air-?blast|broadcast/i.test(text);
+  if (hasSeed) return "Seed Treatment";
+  if (hasSoil && !hasFoliar) return "Soil";
+  if (hasFoliar && !hasSoil) return "Foliar";
+  return null;
+}
+
+function inferAppTypeFromEvidence(target, text) {
+  const t = String(target || "");
+  if (t === "Seed Treatment") return "Seed Treatment";
+  if (isFoliarLikeTarget(t)) {
+    if (/\bbanded?\b|band\s+application/i.test(text)) return "Banded";
+    if (/\bdirected\s+spray\b/i.test(text)) return "Directed Spray";
+    if (/\bshielded\s+spray\b/i.test(text)) return "Shielded Spray";
+    if (/\bbroadcast\b|\baerial\b|aircraft|ground\s+sprayers?|ground\s+boom|air-?blast/i.test(text)) return "Broadcast";
+  }
+  if (t === "Soil") {
+    if (/\bchemigation\b|\bdrip\b|\btrickle\b|micro-?sprinkler/i.test(text)) return "Chemigation";
+    if (/\binject(?:ion|ed)?\b/i.test(text)) return "Injection";
+    if (/\bin-?furrow\b/i.test(text)) return "In-furrow spray";
+    if (/\bdrench\b/i.test(text)) return "Drench";
+    if (/\bside-?dress\b/i.test(text)) return "Side-dress";
+  }
+  return null;
+}
+
+function buildReviewStations(context) {
+  const documents = context.documents || [];
+  const remediation = context.remediation || { notes: [], applied: 0 };
+  const missingCoverage = coverageWarnings(allRows, documents).filter(w => w.rows === 0);
+  const snippetRows = allRows.slice(0, 4);
+  const riskyRows = allRows.filter(r => {
+    const keys = ["App. Target", "App. Type", "App. Timing (Site Status)", "App. Timing (other)", "App Rate (lb ai/A)", "PHI (days)", "REI"];
+    return keys.some(k => r[k] === NOT_SPECIFIED || (r.__derived && r.__derived[k]));
+  }).slice(0, 5);
+
+  return [
+    {
+      title: "Station 1 of 3 — Document snapshot",
+      text: "Confirm the core document-level facts before final release.",
+      render: () => {
+        const docsHtml = documents.map(d =>
+          `<div class="mini-card"><div class="meta">${esc(d.fileName)}</div>` +
+          `<div>Pages: <b>${d.numPages}</b> · Product: <b>${esc(findProductName(d.fullText) || NOT_SPECIFIED)}</b></div></div>`
+        ).join("");
+        const forms = [...new Set(allRows.map(r => r["Physical Form"]))].join(", ");
+        return docsHtml +
+          `<div class="mini-card"><div>Selected active ingredient: <b>${esc(context.selectedAi || "Auto (single active)")}</b></div>` +
+          `<div>Reg # values seen: <b>${esc([...new Set(allRows.map(r => r["Reg. #/File Sym"]))].join(", "))}</b></div>` +
+          `<div>Physical form values seen: <b>${esc(forms || NOT_SPECIFIED)}</b></div></div>`;
+      }
+    },
+    {
+      title: "Station 2 of 3 — Extraction sanity",
+      text: "Review row/use counts and quick source snippets before final release.",
+      render: () => {
+        const summary = `<div class="mini-card"><div>Total rows: <b>${allRows.length}</b> · Unique uses: <b>${new Set(allRows.map(r => r["Use"])).size}</b></div>` +
+          `<div>Coverage warnings (missing rows): <b>${missingCoverage.length}</b></div>` +
+          `<div>QC remediation actions: <b>${remediation.applied}</b></div></div>`;
+        const rows = snippetRows.map(r => `
+          <tr>
+            <td>${esc(r["Use"])}</td>
+            <td><code>p${esc(r["Page"])} · ${esc(r["Source File"])}</code></td>
+            <td>${esc(r["Use Site"])}</td>
+            <td>${esc(r["App. Target"])} / ${esc(r["App. Type"])}</td>
+            <td>${esc(r["App. Timing (Site Status)"])} · ${esc(r["App. Timing (other)"])}</td>
+            <td>${esc(String(r.__source || "").slice(0, 180))}${String(r.__source || "").length > 180 ? "..." : ""}</td>
+          </tr>`).join("");
+        const grid = `<div class="review-grid"><table><thead><tr>` +
+          `<th>Use</th><th>Page / File</th><th>Use Site</th><th>Target / Type</th><th>Timing</th><th>Source Snippet</th>` +
+          `</tr></thead><tbody>${rows}</tbody></table></div>`;
+        return summary + grid;
+      }
+    },
+    {
+      title: "Station 3 of 3 — High-risk field check",
+      text: "Check sampled high-impact fields before final release/export.",
+      render: () => {
+        const rows = (riskyRows.length ? riskyRows : allRows.slice(0, 6)).map(r => {
+          const derivedMark = c => (r.__derived && r.__derived[c]) ? " ◆" : "";
+          return `
+            <tr>
+              <td>${esc(r["Use"])}</td>
+              <td><code>p${esc(r["Page"])} · ${esc(r["Source File"])}</code></td>
+              <td>${esc(r["Use Site"])}${derivedMark("Use Site")}</td>
+              <td>${esc(r["App. Target"])} / ${esc(r["App. Type"])}${derivedMark("App. Type")}</td>
+              <td>${esc(r["App. Equipment"])}</td>
+              <td>${esc(r["App. Timing (Site Status)"])}${derivedMark("App. Timing (Site Status)")} · ${esc(r["App. Timing (other)"])}${derivedMark("App. Timing (other)")}</td>
+              <td>${esc(r["App Rate (lb ai/A)"])} · Max ${esc(r["A.I. Max Single Rate/App. (lb a.i./A)"])}</td>
+              <td>PHI ${esc(r["PHI (days)"])} · REI ${esc(r["REI"])} · MRI ${esc(r["MRI (days)"])}</td>
+              <td>${esc(r["Max # Apps/C.C."])} / ${esc(r["Max # Apps/Yr."])} / ${esc(r["Max No. of CC/yr"])}</td>
+              <td>${esc(r["Geographic Restrictions"])}</td>
+            </tr>`;
+        }).join("");
+        return `<div class="risk-grid"><table><thead><tr>` +
+          `<th>Use</th><th>Page / File</th><th>Use Site</th><th>Target / Type</th><th>Equipment</th><th>Timing</th><th>Rate</th><th>Intervals</th><th>App Limits</th><th>Geographic Restriction</th>` +
+          `</tr></thead><tbody>${rows}</tbody></table></div>`;
+      }
+    }
+  ];
+}
+
+function renderReviewStage() {
+  if (!reviewFlow) {
+    reviewGateEl.style.display = "none";
+    return;
+  }
+  const stage = reviewFlow.stages[reviewFlow.stageIndex];
+  reviewGateEl.style.display = "block";
+  reviewStageTitleEl.textContent = stage.title;
+  reviewStageTextEl.textContent = stage.text;
+  reviewStageBodyEl.innerHTML = stage.render();
+  if (reviewFlow.paused) {
+    reviewGateNoteEl.textContent = "Finalization is paused because this station was marked No. Review/edit draft data, then resume this station check.";
+    reviewYesBtn.style.display = "none";
+    reviewNoBtn.style.display = "none";
+    reviewResumeBtn.style.display = "inline-block";
+    reviewRerunBtn.style.display = "inline-block";
+  } else {
+    reviewGateNoteEl.textContent = "Choose Yes to move to the next station. Choose No to pause finalization and review/edit before continuing.";
+    reviewYesBtn.style.display = "inline-block";
+    reviewNoBtn.style.display = "inline-block";
+    reviewResumeBtn.style.display = "none";
+    reviewRerunBtn.style.display = "none";
+  }
+}
+
+function setExportLock() {
+  const locked = !!(reviewFlow && !reviewFlow.approved);
+  downloadBtn.disabled = !allRows.length || locked;
+}
+
+function clearJumpContext() {
+  jumpContext = null;
+  jumpBackWrapEl.style.display = "none";
+}
+
+function openRowById(rowId) {
+  const rowEl = groupsEl.querySelector(`tr[data-id="${CSS.escape(rowId)}"]`);
+  if (!rowEl) return;
+  rowEl.scrollIntoView({ block: "center", inline: "nearest" });
+  const toggle = rowEl.querySelector("button[data-toggle]");
+  if (toggle && toggle.getAttribute("aria-expanded") !== "true") {
+    toggle.click();
+  }
+}
+
+function jumpToQcDefect(code) {
+  if (!allRows.length) return;
+  const focusMap = {
+    "QC-TIMESTATUS-006": { column: "App. Timing (Site Status)", match: r => r["App. Timing (Site Status)"] === NOT_SPECIFIED },
+    "QC-TIMEOTHER-007": { column: "App. Timing (other)", match: r => r["App. Timing (other)"] === NOT_SPECIFIED },
+    "QC-APPTYPE-008": { column: "App. Type", match: r => r["App. Type"] === NOT_SPECIFIED && r["App. Target"] !== NOT_SPECIFIED },
+    "QC-FORM-005": { column: "Physical Form", match: r => r["Physical Form"] === NOT_SPECIFIED }
+  };
+  const target = focusMap[code];
+  if (!target) return;
+  const matchedRows = allRows.filter(target.match);
+  if (!matchedRows.length) return;
+  if (reviewFlow) {
+    jumpContext = {
+      stageIndex: reviewFlow.stageIndex,
+      paused: reviewFlow.paused,
+      approved: reviewFlow.approved,
+      stages: reviewFlow.stages
+    };
+  }
+  if (reviewFlow && reviewFlow.paused) reviewFlow.paused = false;
+  clearReviewFlow();
+  showResults();
+  searchEl.value = String(matchedRows[0]["Use"] || "");
+  renderTable(searchEl.value);
+  const header = [...groupsEl.querySelectorAll("th")].find(th => th.textContent.includes(target.column));
+  if (header) header.scrollIntoView({ block: "nearest", inline: "center" });
+  openRowById(matchedRows[0].__id);
+  jumpBackWrapEl.style.display = "block";
+}
+
+qcDefectsEl.addEventListener("click", e => {
+  const btn = e.target.closest("button[data-qc-jump]");
+  if (!btn) return;
+  jumpToQcDefect(btn.dataset.qcJump);
+});
+
+jumpBackBtn.addEventListener("click", () => {
+  if (!jumpContext) return;
+  reviewFlow = {
+    approved: jumpContext.approved,
+    paused: jumpContext.paused,
+    stageIndex: jumpContext.stageIndex,
+    stages: jumpContext.stages
+  };
+  clearJumpContext();
+  resultsEl.style.display = jumpContext.paused ? "block" : "none";
+  placeholderEl.style.display = jumpContext.paused ? "none" : "block";
+  if (!jumpContext.paused) {
+    placeholderEl.textContent = `Waiting for review approval — Station ${reviewFlow.stageIndex + 1} of ${reviewFlow.stages.length}.`;
+  }
+  renderReviewStage();
+  setExportLock();
+});
+
+function startReviewFlow(context) {
+  reviewFlow = {
+    approved: false,
+    paused: false,
+    stageIndex: 0,
+    stages: buildReviewStations(context)
+  };
+  placeholderEl.style.display = "block";
+  placeholderEl.textContent = "Waiting for review approval — Station 1 of 3.";
+  resultsEl.style.display = "none";
+  statusEl.textContent = "Waiting for review approval — Station 1 of 3.";
+  renderReviewStage();
+  setExportLock();
+}
+
+function clearReviewFlow() {
+  reviewFlow = null;
+  reviewGateEl.style.display = "none";
+  reviewStageBodyEl.innerHTML = "";
+  reviewStageTitleEl.textContent = "";
+  reviewStageTextEl.textContent = "";
+  reviewGateNoteEl.textContent = "";
+  setExportLock();
+}
+
+reviewYesBtn.addEventListener("click", () => {
+  if (!reviewFlow || reviewFlow.paused) return;
+  if (reviewFlow.stageIndex < reviewFlow.stages.length - 1) {
+    reviewFlow.stageIndex += 1;
+    statusEl.textContent = `Waiting for review approval — Station ${reviewFlow.stageIndex + 1} of ${reviewFlow.stages.length}.`;
+    renderReviewStage();
+    return;
+  }
+  reviewFlow.approved = true;
+  clearReviewFlow();
+  showResults();
+  statusEl.textContent = "Review approved — final extracted table released.";
+});
+
+reviewNoBtn.addEventListener("click", () => {
+  if (!reviewFlow) return;
+  reviewFlow.paused = true;
+  showResults();
+  statusEl.textContent = `Finalization paused at Station ${reviewFlow.stageIndex + 1}. Review/edit data, then resume station check.`;
+  renderReviewStage();
+  setExportLock();
+});
+
+reviewResumeBtn.addEventListener("click", () => {
+  if (!reviewFlow) return;
+  reviewFlow.paused = false;
+  renderReviewStage();
+});
+
+reviewRerunBtn.addEventListener("click", () => {
+  if (!reviewFlow) return;
+  clearReviewFlow();
+  if (!runBtn.disabled) runBtn.click();
+});
+
+function applyRuntimeQcRemediation(rows, documents) {
+  const docByFile = new Map((documents || []).map(d => [d.fileName, d]));
+  const counters = {
+    physicalForm: 0,
+    appType: 0,
+    timingStatus: 0,
+    timingOther: 0,
+    appTarget: 0
+  };
+
+  for (const row of rows) {
+    const doc = docByFile.get(row["Source File"]);
+    if (!doc) continue;
+
+    if (!doc.__physicalForm) {
+      const explicitForm = firstMatch(doc.fullText, FIELD_PATTERNS.physicalForm);
+      const fromName = doc.productName && /\b(WP|SC|WG|WDG|EC|SL|SE|ME|CS|DF|FL|FS|GR)\b/i.test(doc.productName)
+        ? doc.productName.match(/\b(WP|SC|WG|WDG|EC|SL|SE|ME|CS|DF|FL|FS|GR)\b/i)[1]
+        : null;
+      doc.__physicalForm = explicitForm || fromName || null;
+    }
+
+    if (row["Physical Form"] === NOT_SPECIFIED && doc.__physicalForm) {
+      row["Physical Form"] = doc.__physicalForm;
+      counters.physicalForm++;
+    }
+
+    if (row["App. Target"] === NOT_SPECIFIED) {
+      const evidence = [
+        String(row.__source || ""),
+        String(row["Additional Information"] || ""),
+        String(row["App. Equipment"] || "")
+      ].join(" ");
+      const inferredTarget = inferTargetFromEvidence(evidence);
+      if (inferredTarget) {
+        row["App. Target"] = inferredTarget;
+        (row.__derived = row.__derived || {})["App. Target"] = "QC-RT-001";
+        counters.appTarget++;
+      }
+    }
+
+    if (row["App. Type"] === NOT_SPECIFIED && row["App. Target"] !== NOT_SPECIFIED) {
+      const evidence = [
+        String(row.__source || ""),
+        String(row["Additional Information"] || ""),
+        String(row["App. Equipment"] || "")
+      ].join(" ");
+      const inferredType = inferAppTypeFromEvidence(row["App. Target"], evidence);
+      if (inferredType) {
+        row["App. Type"] = inferredType;
+        (row.__derived = row.__derived || {})["App. Type"] = "QC-RT-004";
+        counters.appType++;
+      }
+    }
+
+    if (row["App. Timing (Site Status)"] === NOT_SPECIFIED && row["App. Target"] !== NOT_SPECIFIED) {
+      const evidence = [
+        String(row.__source || ""),
+        String(row["Additional Information"] || ""),
+        String(row["Use"] || "")
+      ].join(" ");
+      const [statusValue, statusRule] = deriveTimingStatus(evidence, row["App. Target"]);
+      if (statusValue) {
+        row["App. Timing (Site Status)"] = statusValue;
+        (row.__derived = row.__derived || {})["App. Timing (Site Status)"] = statusRule || "QC-RT-002";
+        counters.timingStatus++;
+      }
+    }
+
+    if (row["App. Timing (other)"] === NOT_SPECIFIED) {
+      const evidence = [
+        String(row.__source || ""),
+        String(row["Additional Information"] || "")
+      ].join(" ");
+      const blockTiming = firstMatch(evidence, FIELD_PATTERNS.appTimingOther);
+      if (doc.__timingOther === undefined) {
+        const timing = firstMatch(doc.fullText, FIELD_PATTERNS.appTimingOther);
+        doc.__timingOther = timing ? normaliseTimingOther(timing) : null;
+      }
+      const fallback = blockTiming ? normaliseTimingOther(blockTiming) : doc.__timingOther;
+      if (fallback) {
+        row["App. Timing (other)"] = fallback;
+        (row.__derived = row.__derived || {})["App. Timing (other)"] = "QC-RT-003";
+        counters.timingOther++;
+      }
+    }
+
+    row["App. Timing (other)"] = capitaliseSentenceStart(row["App. Timing (other)"]);
+    row["App. Timing (Site Status)"] = capitaliseSentenceStart(row["App. Timing (Site Status)"]);
+    row["Confidence"] = scoreRow(row);
+  }
+
+  const notes = [];
+  if (counters.physicalForm) notes.push(`Filled Physical Form on ${counters.physicalForm} row(s).`);
+  if (counters.appTarget) notes.push(`Inferred App. Target on ${counters.appTarget} row(s).`);
+  if (counters.appType) notes.push(`Filled App. Type on ${counters.appType} row(s).`);
+  if (counters.timingStatus) notes.push(`Filled App. Timing (Site Status) on ${counters.timingStatus} row(s).`);
+  if (counters.timingOther) notes.push(`Filled App. Timing (other) on ${counters.timingOther} row(s).`);
+  const applied = counters.physicalForm + counters.appTarget + counters.appType + counters.timingStatus + counters.timingOther;
+
+  return { applied, counters, notes };
+}
+
+function runRuntimeQcGate(rows, documents, schemaFailures) {
+  const defects = [];
+  const push = (severity, code, message) => defects.push({ severity, code, message });
+
+  if (FORCE_QC_FAIL) {
+    push("High", "QC-TEST-999", "Forced QC failure is enabled via ?forceQcFail=1 (testing mode).");
+  }
+
+  if (!rows.length) {
+    push("Critical", "QC-ROW-000", "No extracted rows were produced.");
+  }
+  if (schemaFailures.length) {
+    push("Critical", "QC-SCHEMA-001", `${schemaFailures.length} row(s) failed schema validation.`);
+  }
+
+  const docByFile = new Map((documents || []).map(d => [d.fileName, d]));
+  const badPageRows = rows.filter(r => {
+    const doc = docByFile.get(r["Source File"]);
+    if (!doc) return false;
+    const page = Number(String(r["Page"] || "").trim());
+    return !Number.isFinite(page) || page < 1 || page > doc.numPages;
+  });
+  if (badPageRows.length) {
+    push("High", "QC-PAGE-002", `${badPageRows.length} row(s) have out-of-range page values.`);
+  }
+
+  const missingSource = rows.filter(r => !String(r.__source || "").trim());
+  if (missingSource.length) {
+    push("High", "QC-SOURCE-003", `${missingSource.length} row(s) have no source text trace.`);
+  }
+
+  const missingCoverage = coverageWarnings(rows, documents).filter(w => w.rows === 0);
+
+  const missingPhysicalForm = rows.filter(r => r["Physical Form"] === NOT_SPECIFIED);
+  if (missingPhysicalForm.length) {
+    defects.push({ severity: "Medium", code: "QC-FORM-005", message: `${missingPhysicalForm.length} row(s) still have Physical Form = NS.`, jumpLabel: "Show rows" });
+  }
+
+  const missingTimingStatus = rows.filter(r =>
+    r["App. Target"] !== NOT_SPECIFIED && r["App. Timing (Site Status)"] === NOT_SPECIFIED);
+  if (missingTimingStatus.length) {
+    defects.push({ severity: "Medium", code: "QC-TIMESTATUS-006", message: `${missingTimingStatus.length} row(s) still have App. Timing (Site Status) = NS.`, jumpLabel: "Jump to rows" });
+  }
+
+  const missingTimingOther = rows.filter(r => r["App. Timing (other)"] === NOT_SPECIFIED);
+  if (missingTimingOther.length) {
+    defects.push({ severity: "Medium", code: "QC-TIMEOTHER-007", message: `${missingTimingOther.length} row(s) still have App. Timing (other) = NS.`, jumpLabel: "Jump to rows" });
+  }
+
+  const missingAppType = rows.filter(r =>
+    r["App. Target"] !== NOT_SPECIFIED && r["App. Type"] === NOT_SPECIFIED);
+  if (missingAppType.length) {
+    defects.push({ severity: "Medium", code: "QC-APPTYPE-008", message: `${missingAppType.length} row(s) still have App. Type = NS despite known App. Target.`, jumpLabel: "Jump to rows" });
+  }
+
+  const counts = defects.reduce((acc, d) => {
+    acc[d.severity] = (acc[d.severity] || 0) + 1;
+    return acc;
+  }, {});
+  const hasBlocking = defects.some(d => d.severity === "Critical" || d.severity === "High");
+
+  return {
+    passed: !hasBlocking,
+    defects,
+    counts,
+    checkedRows: rows.length
+  };
+}
+
+/* --- TASK 11 (R13) — render coverage warnings ---------------------
+  The missing-crop cross-check needs the label text from the current
+  extraction. If no extracted documents are present, skip this check
+  rather than reporting a false all-clear.
+------------------------------------------------------------------ */
+function renderWarnings(rows) {
+  const warns = coverageWarnings(rows, window.__extractedDocuments);
+  if (!warns.length) { warningsEl.style.display = "none"; return; }
+  warningsEl.style.display = "block";
+  const missing = warns.filter(w => w.rows === 0);
+  const sparse  = warns.filter(w => w.rows > 0);
+  const section = (list, heading) => list.length ? `
+    <h4>${heading} — ${list.length} crop${list.length === 1 ? "" : "s"}</h4>
+    <ul>${list.map(w =>
+      `<li><b>${esc(w.crop)}</b> (page ${esc(w.pages)}) — ${esc(w.detail)}. Check the label directly.</li>`
+    ).join("")}</ul>` : "";
+  warningsEl.innerHTML =
+    section(missing, "⚠ Crops named in the label with no row at all") +
+    section(sparse,  "⚠ Rows that may be under-read");
+}
+
+/* --- TASK 12 (R17) — sorting state -------------------------------- */
+let sortCol = null, sortDir = 1;
+
+function sortRows(rows) {
+  if (!sortCol) return rows;
+  const numeric = ["Page", "Max # Apps/C.C.", "Max # Apps/Yr.", "Max No. of CC/yr", "PHI (days)", "REI", "MRI (days)"];
+  const rank = { High: 3, Medium: 2, Low: 1 };
+  return [...rows].sort((a, b) => {
+    let x = a[sortCol], y = b[sortCol];
+    if (sortCol === "Confidence") return (rank[x] - rank[y]) * sortDir;
+    if (numeric.includes(sortCol)) {
+      const nx = parseFloat(x), ny = parseFloat(y);
+      if (!isNaN(nx) && !isNaN(ny)) return (nx - ny) * sortDir;
+    }
+    // Push NS / NA to the bottom regardless of direction
+    const blankish = v => v === NOT_SPECIFIED || v === NOT_APPLICABLE;
+    if (blankish(x) && !blankish(y)) return 1;
+    if (blankish(y) && !blankish(x)) return -1;
+    return String(x).localeCompare(String(y)) * sortDir;
+  });
+}
+
+/* --- TASK 5 / 9 / 10 / 13 — the results table --------------------- */
+function renderTable(term = "") {
+  const q = term.trim().toLowerCase();
+  const conf = confFilterEl.value;
+
+  let matches = allRows;
+  if (q)    matches = matches.filter(r => DISPLAY_COLUMNS.some(c => String(r[c]).toLowerCase().includes(q)));
+  if (conf) matches = matches.filter(r => r["Confidence"] === conf);
+
+  if (!matches.length) {
+    groupsEl.innerHTML = `<div class="group"><div class="empty">No rows match the current filters.</div></div>`;
+    return;
+  }
+
+  // Group rows by their source file
+  const groups = new Map();
+  matches.forEach(r => {
+    if (!groups.has(r["Source File"])) groups.set(r["Source File"], []);
+    groups.get(r["Source File"]).push(r);
+  });
+
+  const arrow = c => sortCol === c ? (sortDir === 1 ? "▲" : "▼") : "↕";
+  const ariaSort = c => sortCol === c ? (sortDir === 1 ? "ascending" : "descending") : "none";
+
+  groupsEl.innerHTML = [...groups.entries()].map(([file, rows]) => `
+    <div class="group">
+      <div class="head">
+        <span>📄 ${esc(file)}</span>
+        <span class="count">${rows.length} row${rows.length === 1 ? "" : "s"}${
+          q || conf ? " matching filters" : ""}</span>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead><tr>
+            <th><span class="sr-only">Show source text</span></th>
+            ${DISPLAY_COLUMNS.map(c =>
+              `<th class="sortable" data-sort="${esc(c)}" aria-sort="${ariaSort(c)}" title="Sort by ${esc(c)}">${esc(c)}<span class="arrow" aria-hidden="true">${arrow(c)}</span></th>`
+            ).join("")}
+          </tr></thead>
+          <tbody>
+            ${sortRows(rows).map(r => `
+              <tr data-id="${esc(r.__id)}" class="${r["Confidence"] === "Low" ? "low" : ""}">
+                <td class="toggle"><button class="toggle-btn" type="button" data-toggle="${esc(r.__id)}" aria-expanded="false" aria-label="Show source text" title="Show source text">▸</button></td>
+                ${DISPLAY_COLUMNS.map(c => {
+                  if (c === "Confidence")
+                    return `<td><span class="conf ${esc(r[c])}">${esc(r[c])}</span></td>`;
+                  const na = r[c] === NOT_SPECIFIED || r[c] === NOT_APPLICABLE;
+                  const drv = r.__derived && r.__derived[c];
+                  const cls = [
+                    na ? "na" : "",
+                    c === "Use" ? "crop" : "",
+                    LONG_COLUMNS.has(c) ? "long" : "",
+                    drv ? "derived" : "",
+                    r.__edited && r.__edited[c] ? "edited" : ""
+                  ].filter(Boolean).join(" ");
+                  const editable = c !== "Page" ? ` contenteditable="true" data-col="${esc(c)}"` : "";
+                  const title = drv ? ` title="Derived by rule ${esc(drv)} — see knowledge/derivation-rules.md"` : "";
+                  return `<td class="${cls}"${editable}${title}><div class="cell-box">${highlight(r[c], q)}</div></td>`;
+                }).join("")}
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`).join("");
+}
+
+// Sorting (R17)
+groupsEl.addEventListener("click", e => {
+  const th = e.target.closest("th.sortable");
+  if (!th) return;
+  const col = th.dataset.sort;
+  if (sortCol === col) sortDir = -sortDir; else { sortCol = col; sortDir = 1; }
+  renderTable(searchEl.value);
+});
+
+// Source-text reveal (R12)
+groupsEl.addEventListener("click", e => {
+  const toggle = e.target.closest("button[data-toggle]");
+  if (!toggle) return;
+  const tr = toggle.closest("tr");
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains("source-row")) {
+    next.remove();
+    toggle.textContent = "▸";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-label", "Show source text");
+    return;
+  }
+  const row = allRows.find(r => r.__id === toggle.dataset.toggle);
+  if (!row) return;
+  const span = tr.children.length;
+  const src = document.createElement("tr");
+  src.className = "source-row";
+  src.innerHTML = `<td colspan="${span}"><b>Page ${esc(row["Page"])} of ${esc(row["Source File"])}</b><br>${
+    esc(row.__source || "No source text recorded for this row.")}</td>`;
+  tr.after(src);
+  toggle.textContent = "▾";
+  toggle.setAttribute("aria-expanded", "true");
+  toggle.setAttribute("aria-label", "Hide source text");
+});
+
+// Inline editing (R14)
+groupsEl.addEventListener("blur", e => {
+  const td = e.target.closest("td[contenteditable]");
+  if (!td) return;
+  const id = td.closest("tr").dataset.id;
+  const col = td.dataset.col;
+  const row = allRows.find(r => r.__id === id);
+  if (!row) return;
+  const value = td.textContent.trim() || NOT_SPECIFIED;
+  if (value === row[col]) return;
+  row[col] = value;
+  row.__edited = row.__edited || {};
+  row.__edited[col] = true;
+  // R24 — a hand-edit replaces a derived value, so it is no longer derived.
+  if (row.__derived && row.__derived[col]) {
+    delete row.__derived[col];
+    td.classList.remove("derived");
+    td.removeAttribute("title");
+  }
+  row["Confidence"] = scoreRow(row);
+  td.classList.add("edited");
+  td.classList.toggle("na", value === NOT_SPECIFIED);
+  renderStats(allRows);
+  renderWarnings(allRows);
+}, true);
+
+groupsEl.addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.closest("td[contenteditable]")) {
+    e.preventDefault(); e.target.blur();
+  }
+});
+
+searchEl.addEventListener("input", e => renderTable(e.target.value));
+confFilterEl.addEventListener("change", () => renderTable(searchEl.value));
+
+/**
+ * Strips internal fields so exports contain only real data.
+ *
+ * R24 — a derived value must stay distinguishable from one read verbatim off
+ * the label. On screen that is the ◆ marker; in a spreadsheet there are no
+ * tooltips, so the provenance is written into its own column. Without this a
+ * reviewer cannot tell `Agricultural (Outdoor)` (convention) from `264-1198`
+ * (printed on the label), which is the whole point of R19.
+ */
+const DERIVED_COLUMN = "Derived Fields";
+
+function derivedSummary(row) {
+  const entries = Object.entries(row.__derived || {});
+  if (!entries.length) return "None — all values read from the label";
+  return entries.map(([col, ruleId]) => `${col} (${ruleId})`).join("; ");
+}
+
+function exportRows(rows) {
+  return rows.map(r => {
+    const out = {};
+    ["Source File", ...DISPLAY_COLUMNS].forEach(c => { out[c] = r[c]; });
+    out[DERIVED_COLUMN] = derivedSummary(r);
+    return out;
+  });
+}
+
+/** Export column order. Not part of SCHEMA — the 27 columns stay fixed. */
+const EXPORT_COLUMNS = ["Source File", ...DISPLAY_COLUMNS, DERIVED_COLUMN];
+
+function safeSheetName(name, used) {
+  const base = String(name || "Sheet")
+    .replace(/[\\\/?*\[\]:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim() || "Sheet";
+  let out = base.slice(0, 31);
+  let n = 2;
+  while (used.has(out)) {
+    const suffix = ` (${n++})`;
+    out = (base.slice(0, 31 - suffix.length) + suffix).trim();
+  }
+  used.add(out);
+  return out;
+}
+
+/* ------------------------------------------------------------------
+   TASK 52 — Presentable Excel export styling (R25)
+   Keep data untouched while making worksheets easier to review.
+------------------------------------------------------------------ */
+const EXCEL_STYLE = {
+  border: { style: "thin", color: { rgb: "FFD0D7E2" } },
+  headerFill: { patternType: "solid", fgColor: { rgb: "FF1F6FEB" } },
+  headerFont: { bold: true, color: { rgb: "FFFFFFFF" }, name: "Calibri", sz: 11 },
+  baseFont: { name: "Calibri", sz: 10, color: { rgb: "FF1F2937" } },
+  altFill: { patternType: "solid", fgColor: { rgb: "FFF8FBFF" } },
+  nsFill: { patternType: "solid", fgColor: { rgb: "FFF2F4F7" } },
+  highFill: { patternType: "solid", fgColor: { rgb: "FFD1FADF" } },
+  mediumFill: { patternType: "solid", fgColor: { rgb: "FFFEF0C7" } },
+  lowFill: { patternType: "solid", fgColor: { rgb: "FFFEE4E2" } },
+  derivedFill: { patternType: "solid", fgColor: { rgb: "FFFFF4DB" } },
+  productFills: [
+    { base: { patternType: "solid", fgColor: { rgb: "FFEFF6FF" } }, strong: { patternType: "solid", fgColor: { rgb: "FFDCEBFF" } } },
+    { base: { patternType: "solid", fgColor: { rgb: "FFF2FAF0" } }, strong: { patternType: "solid", fgColor: { rgb: "FFDEEFDB" } } },
+    { base: { patternType: "solid", fgColor: { rgb: "FFFFF4EB" } }, strong: { patternType: "solid", fgColor: { rgb: "FFFEE7D1" } } },
+    { base: { patternType: "solid", fgColor: { rgb: "FFF6F1FF" } }, strong: { patternType: "solid", fgColor: { rgb: "FFE8DCFF" } } },
+    { base: { patternType: "solid", fgColor: { rgb: "FFEFFAFB" } }, strong: { patternType: "solid", fgColor: { rgb: "FFDCEFF2" } } }
+  ]
+};
+
+function colWidthFromText(value) {
+  const len = String(value ?? "").trim().length;
+  if (!len) return 10;
+  return Math.max(10, Math.min(58, len + 2));
+}
+
+function applyExportSheetStyle(ws, rows) {
+  if (!ws || !ws["!ref"]) return;
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  const confidenceCol = EXPORT_COLUMNS.indexOf("Confidence");
+  const derivedCol = EXPORT_COLUMNS.indexOf(DERIVED_COLUMN);
+  const sourceFileCol = EXPORT_COLUMNS.indexOf("Source File");
+  const productCol = EXPORT_COLUMNS.indexOf("Product Name (PBN)");
+  const productFillByName = new Map();
+  let paletteIdx = 0;
+
+  const fillForProduct = productName => {
+    const key = String(productName || "").trim().toUpperCase() || "__UNKNOWN__";
+    if (!productFillByName.has(key)) {
+      productFillByName.set(key, EXCEL_STYLE.productFills[paletteIdx % EXCEL_STYLE.productFills.length]);
+      paletteIdx += 1;
+    }
+    return productFillByName.get(key);
+  };
+
+  // Widths are computed from both headers and values to avoid clipped text.
+  ws["!cols"] = EXPORT_COLUMNS.map(col => {
+    let maxWidth = colWidthFromText(col);
+    rows.forEach(r => {
+      maxWidth = Math.max(maxWidth, colWidthFromText(r[col]));
+    });
+    return { wch: maxWidth };
+  });
+
+  ws["!rows"] = Array.from({ length: range.e.r + 1 }, (_, idx) =>
+    idx === 0 ? { hpt: 24 } : { hpt: 18 }
+  );
+  ws["!autofilter"] = {
+    ref: XLSX.utils.encode_range({ s: { c: 0, r: 0 }, e: { c: range.e.c, r: range.e.r } })
+  };
+
+  for (let c = 0; c <= range.e.c; c++) {
+    const cellRef = XLSX.utils.encode_cell({ c, r: 0 });
+    const cell = ws[cellRef];
+    if (!cell) continue;
+    cell.s = {
+      font: EXCEL_STYLE.headerFont,
+      fill: EXCEL_STYLE.headerFill,
+      border: {
+        top: EXCEL_STYLE.border,
+        right: EXCEL_STYLE.border,
+        bottom: EXCEL_STYLE.border,
+        left: EXCEL_STYLE.border
+      },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true }
+    };
+  }
+
+  for (let r = 1; r <= range.e.r; r++) {
+    const productPalette = fillForProduct(rows[r - 1]?.["Product Name (PBN)"]);
+    for (let c = 0; c <= range.e.c; c++) {
+      const cellRef = XLSX.utils.encode_cell({ c, r });
+      const cell = ws[cellRef];
+      if (!cell) continue;
+
+      let fill = productPalette.base;
+      const value = String(cell.v ?? "").trim();
+
+      if (value === NOT_SPECIFIED || value === NOT_APPLICABLE) {
+        fill = EXCEL_STYLE.nsFill;
+      } else if (c === confidenceCol) {
+        if (value === "High") fill = EXCEL_STYLE.highFill;
+        else if (value === "Medium") fill = EXCEL_STYLE.mediumFill;
+        else if (value === "Low") fill = EXCEL_STYLE.lowFill;
+      } else if (c === derivedCol && value && !/^None\b/.test(value)) {
+        fill = EXCEL_STYLE.derivedFill;
+      } else if (c === sourceFileCol || c === productCol) {
+        fill = productPalette.strong;
+      }
+
+      cell.s = {
+        font: {
+          ...EXCEL_STYLE.baseFont,
+          bold: c === sourceFileCol || c === productCol,
+          italic: value === NOT_SPECIFIED || value === NOT_APPLICABLE
+        },
+        fill,
+        border: {
+          top: EXCEL_STYLE.border,
+          right: EXCEL_STYLE.border,
+          bottom: EXCEL_STYLE.border,
+          left: EXCEL_STYLE.border
+        },
+        alignment: {
+          horizontal: c === confidenceCol ? "center" : "left",
+          vertical: "top",
+          wrapText: true
+        }
+      };
+    }
+  }
+}
+
+downloadBtn.addEventListener("click", () => {
+  if (reviewFlow && !reviewFlow.approved) {
+    statusEl.textContent = "Approve all three review stations before exporting.";
+    return;
+  }
+  if (!allRows.length) {
+    statusEl.textContent = "No extracted rows to export yet.";
+    return;
+  }
+  if (typeof XLSX === "undefined") {
+    statusEl.textContent = "Excel export is unavailable because SheetJS did not load.";
+    return;
+  }
+
+  const wb = XLSX.utils.book_new();
+  const allData = exportRows(allRows);
+  const wsAll = XLSX.utils.json_to_sheet(allData, { header: EXPORT_COLUMNS });
+  XLSX.utils.sheet_add_aoa(wsAll, [EXPORT_COLUMNS], { origin: "A1" });
+  applyExportSheetStyle(wsAll, allData);
+  XLSX.utils.book_append_sheet(wb, wsAll, "All Uses");
+
+  const byFile = new Map();
+  allRows.forEach(r => {
+    const file = r["Source File"] || "Label";
+    if (!byFile.has(file)) byFile.set(file, []);
+    byFile.get(file).push(r);
+  });
+
+  const usedNames = new Set(["All Uses"]);
+  for (const [file, rows] of byFile.entries()) {
+    const sheetRows = exportRows(rows);
+    const ws = XLSX.utils.json_to_sheet(sheetRows, { header: EXPORT_COLUMNS });
+    XLSX.utils.sheet_add_aoa(ws, [EXPORT_COLUMNS], { origin: "A1" });
+    applyExportSheetStyle(ws, sheetRows);
+    XLSX.utils.book_append_sheet(wb, ws, safeSheetName(file, usedNames));
+  }
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `Use_Summary_Table_${stamp}.xlsx`, { compression: true, cellStyles: true });
+  statusEl.textContent = `Excel downloaded (${allRows.length} row${allRows.length === 1 ? "" : "s"}).`;
+});
+
+/** Shows the results panel and re-renders everything from `allRows`. */
+function showResults() {
+  placeholderEl.style.display = "none";
+  resultsEl.style.display = "block";
+  renderStats(allRows);
+  renderWarnings(allRows);
+  renderTable(searchEl.value);
+  setExportLock();
+}
+
+runBtn.addEventListener("click", async () => {
+  runBtn.disabled = true;
+  clearBtn.disabled = true;
+  clearReviewFlow();
+  noticeEl.style.display = "none";
+  qcGateEl.style.display = "none";
+  qcGateEl.classList.remove("error");
+  qcGateTextEl.textContent = "";
+  qcDefectsEl.style.display = "none";
+  qcDefectsEl.innerHTML = "";
+  resultsEl.style.display = "none";
+  placeholderEl.style.display = "block";
+  placeholderEl.textContent = "Running extraction and QC gate…";
+  logEl.style.display = "block";
+  logEl.textContent = "";
+  barEl.style.display = "block";
+  setProgress(0);
+
+  const documents = [];
+  let totalPages = 0;
+
+  for (let i = 0; i < files.length; i++) {
+    statusEl.textContent = `Reading ${files[i].name} (${i + 1} of ${files.length})…`;
+    try {
+      const doc = await extractPdfText(files[i], msg => { logEl.textContent += msg + "\n"; });
+      documents.push(doc);
+      totalPages += doc.numPages;
+      logEl.textContent += `✔ ${doc.fileName} — ${doc.numPages} page(s), ${doc.fullText.length.toLocaleString()} characters` +
+        `${doc.ocrPages ? ` (${doc.ocrPages} read via OCR)` : ""}\n`;
+      doc.pages.forEach((t, p) => {
+        logEl.textContent += `   · page ${p + 1}: ${t.slice(0, 120)}${t.length > 120 ? "…" : ""}\n`;
+      });
+      console.log(`[Extractor] ${doc.fileName} — ${doc.numPages} pages`, doc.pages);
+    } catch (err) {
+      logEl.textContent += `✖ ${files[i].name} — could not be read (${err.message})\n`;
+      console.error(err);
+    }
+    setProgress(Math.round(((i + 1) / files.length) * 100));
+  }
+
+  window.__extractedDocuments = documents; // raw page text
+
+  // R19 — if the label names several actives, the rate conversion is
+  // ambiguous. Stop and let the analyst pick before parsing.
+  const actives = documents.length
+    ? findActiveIngredients(documents[0].fullText)
+    : [];
+  if (actives.length > 1) {
+    barEl.style.display = "none";
+    statusEl.textContent = "Waiting for active ingredient confirmation…";
+    logEl.textContent += `\n⏸ ${actives.length} active ingredients found: `
+      + actives.map(a => a.name).join(", ")
+      + `\n   Rates can only be expressed for one active — choose one to continue (R19).\n`;
+    aiSelect.innerHTML = actives.map(a =>
+      `<option value="${esc(a.name)}">${esc(a.name)}`
+      + `${a.percent ? ` — ${a.percent}%` : ""}`
+      + `${a.lbPerGal ? ` (${a.lbPerGal} lb/gal)` : ""}</option>`
+    ).join("");
+    aiPickerText.textContent =
+      `Rates in lb a.i./A can only be calculated for one active at a time. `
+      + `Pick the one you want reported; the others are left out of the rate columns.`;
+    aiPicker.style.display = "flex";
+    pendingRun = { documents, totalPages };
+    return;                    // resumes in the Confirm handler
+  }
+
+  finishRun(documents, totalPages, actives[0] ? actives[0].name : null);
+});
+
+/** Parse, render and report. Split out so the AI picker can resume it. */
+function finishRun(documents, totalPages, selectedAi) {
+  aiPicker.style.display = "none";
+  pendingRun = null;
+
+  // TASK 4 — parse every document into schema-compliant rows
+  statusEl.textContent = "Parsing uses and application methods…";
+  allRows = [];
+  documents.forEach(doc => {
+    doc.selectedAi = selectedAi;
+    // Clear the whole doc.__* cache group, not just the two that obviously
+    // depend on the active ingredient — see the convention note above.
+    doc.__aiConc = undefined;
+    doc.__restr  = undefined;
+    doc.__ppe    = undefined;
+    doc.__equip  = undefined;
+    doc.__physicalForm = undefined;
+    const sections = findUseSections(doc.fullText);
+    const byDetector = sections.reduce((acc, s) => {
+      const k = s.detector || "unknown";
+      acc[k] = (acc[k] || 0) + 1;
+      return acc;
+    }, {});
+
+    const rows = parseDocument(doc);
+    allRows.push(...rows);
+    logEl.textContent += `\n→ ${doc.fileName}: ${rows.length} use row(s) parsed\n`;
+    logEl.textContent += `   section detectors: ${Object.entries(byDetector).map(([k, n]) => `${k}=${n}`).join(", ") || "none"}\n`;
+    if (selectedAi) {
+      logEl.textContent += `   active ingredient: ${selectedAi}\n`;
+    }
+    // Show the conversion basis so lb a.i./A values can be rechecked by hand.
+    logEl.textContent += doc.__aiConc
+      ? `   a.i. concentration read from label: ${round3(doc.__aiConc)} lb a.i./gal `
+        + `— lb a.i./A = (fl oz/A ÷ 128) × ${round3(doc.__aiConc)}\n`
+      : `   a.i. concentration not stated on this label — lb a.i./A left NS (R19)\n`;
+    rows.forEach(r => {
+      logEl.textContent += `   • ${r["Use"]} — ${r["App. Target"]}/${r["App. Type"]} | rate: ${r["App Rate (lb ai/A)"]} | PHI: ${r["PHI (days)"]} | REI: ${r["REI"]}\n`;
+      // R24 — name the rule behind every derived value so it can be reviewed.
+      const drv = Object.entries(r.__derived || {});
+      if (drv.length) {
+        logEl.textContent += `       derived: ${drv.map(([c, id]) => `${c}="${r[c]}" (${id})`).join("; ")}\n`;
+      }
+    });
+    console.table(rows);
+  });
+
+  window.__useSummaryRows = allRows;
+
+  // TASK 5 / 10 / 11 — render table, confidence badges and coverage warnings
+  searchEl.value = "";
+  confFilterEl.value = "";
+  sortCol = null;
+
+  const remediation = applyRuntimeQcRemediation(allRows, documents);
+
+  // Schema verification — every row must have all columns filled
+  const bad = allRows.filter(r => !isSchemaCompliant(
+    Object.fromEntries(SCHEMA.map(c => [c, r[c]]))
+  ));
+  const crops = new Set(allRows.map(r => r["Use"])).size;
+  const lowRows = allRows.filter(r => r["Confidence"] === "Low").length;
+  const warnCount = coverageWarnings(allRows, documents).length;
+  const derivedCount = allRows.reduce((n, r) => n + Object.keys(r.__derived || {}).length, 0);
+  const qcReport = runRuntimeQcGate(allRows, documents, bad);
+  qcReport.remediation = remediation;
+  renderQcGateReport(qcReport);
+
+  statusEl.textContent = qcReport.passed
+    ? `Done — ${documents.length} document(s), ${totalPages} page(s), ${allRows.length} row(s).`
+    : `QC blocked — ${documents.length} document(s), ${totalPages} page(s), ${allRows.length} row(s).`;
+  noticeTx.textContent = !qcReport.passed
+    ? "Extraction finished but results were held back by the QC gate. Fix the listed defects and run again."
+    : bad.length === 0
+    ? `Extraction complete. ${allRows.length} use row(s) across ${crops} use(s) from ${documents.length} document(s) (${totalPages} pages). ` +
+      `Output is schema-verified: all ${SCHEMA.length} columns present in every row, no blanks. ` +
+      `${lowRows} row(s) flagged low confidence${warnCount ? ` and ${warnCount} use(s) flagged for coverage` : ""} — review those before relying on the table. ` +
+      `${derivedCount} cell(s) marked ◆ were filled by a convention rule rather than read verbatim — hover any of them to see which rule.`
+    : `Extraction complete with ${bad.length} row(s) failing schema verification — see console for details.`;
+  noticeIc.textContent = qcReport.passed ? "✔" : "⚠";
+  noticeEl.classList.toggle("error", !qcReport.passed);
+  if (bad.length) console.warn("[Extractor] non-compliant rows", bad);
+  noticeEl.style.display = "flex";
+  if (qcReport.passed) {
+    startReviewFlow({
+      documents,
+      totalPages,
+      selectedAi,
+      qcReport,
+      remediation
+    });
+  } else {
+    clearReviewFlow();
+    resultsEl.style.display = "none";
+    placeholderEl.style.display = "block";
+    placeholderEl.textContent = "Results are withheld until QC passes.";
+    if (qcReport.defects.length) console.warn("[Extractor] QC gate blocked results", qcReport.defects);
+  }
+  runBtn.disabled = clearBtn.disabled = false;
+}
+
+// R19 — resume the run once the analyst has named the active ingredient.
+aiConfirmBtn.addEventListener("click", () => {
+  if (!pendingRun) return;
+  barEl.style.display = "block";
+  finishRun(pendingRun.documents, pendingRun.totalPages, aiSelect.value);
+});
+</script>
+</body>
+</html>
