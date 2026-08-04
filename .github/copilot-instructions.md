@@ -59,13 +59,16 @@ When selecting a model, evaluate **task complexity** using these factors:
 
 Each agent uses **ranked preference chains** that adapt to complexity:
 
-#### **extraction-main-agent** (PDF Parsing & Field Extraction)
+#### **extraction-main-agent** (reads the label directly and builds the table)
 - **Low complexity**: Claude Sonnet 4.5 (fast, accurate for standard labels)
-- **Medium complexity**: Claude Sonnet 4.5 → Claude Opus (escalate if pattern matching fails)
+- **Medium complexity**: Claude Sonnet 4.5 → Claude Opus (escalate if reasoning misses rules)
 - **High complexity**: Claude Opus → Claude Sonnet 4.5 (prefer depth, fallback for speed)
 
-**Why**: Regulatory text parsing + structured extraction needs pattern recognition.
-Sonnet 4.5 handles most labels; Opus for edge cases (contradictions, rare formats).
+**Why**: This agent reads the label PDF itself and applies `extraction-rules.md` /
+`derivation-rules.md` through reasoning (it does not delegate to `app/index.html`'s regex
+engine). That's multi-step regulatory-text reasoning, not pattern matching — Sonnet 4.5
+handles most labels; Opus for edge cases (contradictory wording, conditional rates,
+crop-group exceptions, dense footnotes).
 
 #### **QC-agent** (Accuracy Verification)
 - **Low complexity**: Claude Sonnet 4.5 (spot-check mode)
