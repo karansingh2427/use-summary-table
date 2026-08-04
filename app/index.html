@@ -1486,6 +1486,23 @@ function rowFromBlock(useName, block, doc) {
   if (phi) row["PHI (days)"] = normaliseDays(phi);   // R21 — conditional PHI kept whole
   if (ppe) row["PPE"] = ppe.replace(/\s+/g, " ").trim();
 
+  // If Total Rate/C.C. and Single Rate are both known but Max # Apps/C.C. is
+  // unstated, derive the count arithmetically — this mirrors how analysts fill
+  // the cell (Total ÷ Single, rounded to nearest integer).
+  const singleRateVal = parseFloat(String(row["A.I. Max Single Rate/App. (lb a.i./A)"]).split(/[;,]/)[0].trim());
+  const totalCCVal    = parseFloat(String(row["A.I. Max Total Rate/C.C. (lb a.i./A)"]).trim());
+  if (row["Max # Apps/C.C."] === NOT_SPECIFIED &&
+      isFinite(singleRateVal) && singleRateVal > 0 && isFinite(totalCCVal)) {
+    const derived = Math.round(totalCCVal / singleRateVal);
+    if (derived >= 1 && derived <= 20) row["Max # Apps/C.C."] = String(derived);
+  }
+  const totalYrVal = parseFloat(String(row["A.I. Max Total Rate/Yr. (lb a.i./A)"]).trim());
+  if (row["Max # Apps/Yr."] === NOT_SPECIFIED &&
+      isFinite(singleRateVal) && singleRateVal > 0 && isFinite(totalYrVal)) {
+    const derived = Math.round(totalYrVal / singleRateVal);
+    if (derived >= 1 && derived <= 20) row["Max # Apps/Yr."] = String(derived);
+  }
+
   row["Max No. of CC/yr"] = maxCropCyclesPerYear(block);
 
   if (row["Max No. of CC/yr"] === "1") {
@@ -1636,6 +1653,8 @@ function findProductName(text) {
   const m =
     // "SIVANTO® 400 SL" — brand, symbol, then strength/formulation code.
     head.match(/\b([A-Z][A-Za-z]{2,}\s*[®™]\s*\d{2,4}\s*[A-Z]{2,3})\b/)
+    // "PLENEXOS™ SMART" — brand + symbol + optional ALL-CAPS suffix word (no number)
+    || head.match(/\b([A-Z][A-Za-z]{2,}\s*[®™](?:\s*[A-Z]{2,8})?)/)
     // "SIVANTO® 400" or a bare "SIVANTO®"
     || head.match(/\b([A-Z][A-Za-z]{2,}\s*[®™](?:\s*\d{2,4})?)/)
     // Fall back to an ALL-CAPS name followed by a product-class word.

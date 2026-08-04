@@ -47,7 +47,20 @@ GT_TO_APP = {
 # Columns in the ground truth that have no counterpart in the app schema (skip scoring)
 GT_ONLY = set()
 
-# App-schema columns not in the ground truth (skip scoring — can't evaluate)
+# Product name aliases — maps a normalised app output PBN to the normalised GT PBN.
+# Needed when the app extracts a shorter/different form than the GT uses.
+PBN_ALIASES: dict[str, str] = {
+    # app outputs "PLENEXOS™" (old) or "PLENEXOS™ SMART" (after fix); GT uses full name with parenthetical
+    "plenexos":       "plenexos smart (spd+fpf: flupyradifurone rates)",
+    "plenexos smart": "plenexos smart (spd+fpf: flupyradifurone rates)",
+    # app outputs "BUTEO™"; GT uses the development file code as PBN
+    "buteo":          "byi 02960 480 fs",
+}
+
+def _norm_pbn(v: str) -> str:
+    """Normalise a product name and resolve known aliases."""
+    n = _norm_val(v)
+    return PBN_ALIASES.get(n, n)
 APP_ONLY = {
     _norm_col("App Rate (lb ai/A)"),
     _norm_col("REI"),
@@ -59,24 +72,28 @@ APP_ONLY = {
 # using Jaccard similarity on Use, combined with exact App.Target and App.Type
 # ---------------------------------------------------------------------------
 def _best_match(gt_row: dict, app_rows: list[dict]) -> dict | None:
-    """Return the app row that best matches a GT row, or None if no good match."""
-    gt_pbn    = _norm_val(gt_row.get("Product Name (PBN)", ""))
-    gt_use    = gt_row.get("Use", "")
-    gt_target = _norm_target(gt_row.get("App.\nTarget", gt_row.get("App. Target", "")))
-    gt_type_w = _word_set(gt_row.get("App.\nType", gt_row.get("App. Type", "")))
+    """Return the app row that best matches a GT row, or None if no good match.
+
+    All dict keys are assumed to be already normalised (via _load / _norm_col).
+    """
+    gt_pbn    = _norm_pbn(gt_row.get("product name (pbn)", ""))
+    gt_use    = gt_row.get("use", "")
+    # GT column may have a literal newline in the header — try both forms
+    gt_target = _norm_target(gt_row.get("app. target", gt_row.get("app.\ntarget", "")))
+    gt_type_w = _word_set(gt_row.get("app. type", gt_row.get("app.\ntype", "")))
 
     best_score, best_row = 0.0, None
     for r in app_rows:
-        if _norm_val(r.get("Product Name (PBN)", "")) != gt_pbn:
+        if _norm_pbn(r.get("product name (pbn)", "")) != gt_pbn:
             continue
-        app_target = _norm_target(r.get("App. Target", ""))
+        app_target = _norm_target(r.get("app. target", ""))
         if app_target != gt_target:
             continue  # target must agree (foliar vs soil is a hard split)
         # Type: at least one word must overlap
-        app_type_w = _word_set(r.get("App. Type", ""))
+        app_type_w = _word_set(r.get("app. type", ""))
         if gt_type_w and app_type_w and not (gt_type_w & app_type_w):
             continue
-        use_sim = _jaccard(gt_use, r.get("Use", ""))
+        use_sim = _jaccard(gt_use, r.get("use", ""))
         if use_sim > best_score:
             best_score, best_row = use_sim, r
     return best_row if best_score >= 0.3 else None
@@ -166,7 +183,7 @@ def score(app_csv: str, gt_csv: str) -> None:
     labels: dict[str, dict] = {}
 
     for gt_row in gt_rows:
-        label = _norm_val(gt_row.get("Product Name (PBN)", gt_row.get("product name (pbn)", "unknown")))
+        label = _norm_pbn(gt_row.get("product name (pbn)", gt_row.get("Product Name (PBN)", "unknown")))
         if label not in labels:
             labels[label] = {"gt": 0, "matched": 0, "field_hits": 0, "field_total": 0}
         labels[label]["gt"] += 1
