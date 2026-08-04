@@ -1693,8 +1693,8 @@ function isHeadingToken(tok) {
   if (/^\[\*\]$/.test(tok)) return true;             // label bullet marker
   if (/^(?:and|or)$/i.test(tok)) return true;           // multi-group headings
   if (/^[A-Z][a-z]+$/.test(tok)) return true;          // Title-case headings (e.g., Plenexos)
-  if (/^[A-Z][A-Za-z0-9®™'&.,\/()\-–]{1,}$/.test(tok)) return true;
-  return /^[A-Z0-9®™'&.,\/()\-–]+$/.test(tok) && /[A-Z]/.test(tok);
+  if (/^[A-Z][A-Za-z0-9®™'&.,;\/()\-–]{1,}$/.test(tok)) return true;
+  return /^[A-Z0-9®™'&.,;\/()\-–]+$/.test(tok) && /[A-Z]/.test(tok);
 }
 
 /**
