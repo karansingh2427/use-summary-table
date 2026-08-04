@@ -126,10 +126,21 @@
     background: #fff7f6;
     color: #7a271a;
     border-radius: 10px;
-    padding: 12px 14px;
+    padding: 0;
     font-size: 13px;
   }
-  .qc-defects h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  .qc-defects-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 14px; cursor: pointer; user-select: none;
+  }
+  .qc-defects-header:hover { background: rgba(122, 39, 26, .04); border-radius: 10px; }
+  .qc-defects-toggle { font-size: 18px; transition: transform .2s; }
+  .qc-defects.collapsed .qc-defects-toggle { transform: rotate(-90deg); }
+  .qc-defects-content {
+    max-height: 600px; overflow: hidden; transition: max-height .25s ease;
+    border-top: 1px solid #fecdca; padding: 12px 14px;
+  }
+  .qc-defects.collapsed .qc-defects-content { max-height: 0; border-top: none; padding: 0; }
   .qc-defects ul { margin: 0; padding-left: 18px; }
   .qc-defects li { margin-bottom: 4px; }
 
@@ -2482,18 +2493,25 @@ function renderQcGateReport(report) {
     return;
   }
 
+  const remediationHtml = (report.remediation && report.remediation.applied > 0)
+    ? `<br><b>Auto-remediation</b><ul>${report.remediation.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>`
+    : "";
+  const medHigh = report.defects.filter(d => d.severity === "Medium" || d.severity === "High").length;
   qcDefectsEl.style.display = "block";
+  qcDefectsEl.classList.add("collapsed");
   qcDefectsEl.innerHTML = `
-    <h4>QC defects</h4>
-    <ul>${report.defects.map(d =>
-      `<li><b>${esc(d.severity)}</b> · ${esc(d.code)} — ${esc(d.message)}${d.jumpLabel ? ` <button class="ghost small-target" type="button" data-qc-jump="${esc(d.code)}">${esc(d.jumpLabel)}</button>` : ""}</li>`
-    ).join("")}</ul>`;
-
-  if (report.remediation && report.remediation.applied > 0) {
-    qcDefectsEl.innerHTML += `
-      <h4>Auto-remediation</h4>
-      <ul>${report.remediation.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>`;
-  }
+    <div class="qc-defects-header">
+      <span><strong>QC Defects</strong> (${report.defects.length})</span>
+      <span class="qc-defects-toggle">▸</span>
+    </div>
+    <div class="qc-defects-content">
+      <ul>${report.defects.map(d =>
+        `<li><b>${esc(d.severity)}</b> · ${esc(d.code)} — ${esc(d.message)}${d.jumpLabel ? ` <button class="ghost small-target" type="button" data-qc-jump="${esc(d.code)}">${esc(d.jumpLabel)}</button>` : ""}</li>`
+      ).join("")}</ul>${remediationHtml}
+    </div>`;
+  qcDefectsEl.querySelector(".qc-defects-header").addEventListener("click", () => {
+    qcDefectsEl.classList.toggle("collapsed");
+  });
 }
 
 function canonicalizeAppTarget(value) {
