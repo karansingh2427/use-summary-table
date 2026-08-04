@@ -1424,13 +1424,18 @@ function rowFromBlock(useName, block, doc) {
   const appsYr   = firstMatch(block, FIELD_PATTERNS.maxAppsYr);
   const totalCC  = firstMatch(block, FIELD_PATTERNS.maxTotalCC);
   const totalYr  = firstMatch(block, FIELD_PATTERNS.maxTotalYr);
-  const mri      = firstMatch(block, FIELD_PATTERNS.mriLabelled)
-                || firstMatch(block, FIELD_PATTERNS.mri);
+  // PHI, MRI, and REI are in the "Application Restrictions:" subsection.
+  // Searching only from the LAST occurrence of that header prevents values
+  // from a preceding crop's restriction table bleeding into the current row.
+  const restrIdx = block.lastIndexOf("Application Restrictions:");
+  const restrBlock = restrIdx >= 0 ? block.slice(restrIdx) : block;
+  const mri      = firstMatch(restrBlock, FIELD_PATTERNS.mriLabelled)
+                || firstMatch(restrBlock, FIELD_PATTERNS.mri);
   if (doc.__rei === undefined) {
     doc.__rei = firstMatch(doc.fullText, FIELD_PATTERNS.rei) || null;
   }
-  const rei      = firstMatch(block, FIELD_PATTERNS.rei) || doc.__rei;
-  const phi      = firstMatch(block, FIELD_PATTERNS.phi);
+  const rei      = firstMatch(restrBlock, FIELD_PATTERNS.rei) || doc.__rei;
+  const phi      = firstMatch(restrBlock, FIELD_PATTERNS.phi);
   // PPE is stated once for the whole product — cached per document, not re-scanned per row.
   if (doc.__ppe === undefined) {
     doc.__ppe = firstMatch(doc.fullText, FIELD_PATTERNS.ppe) || null;
