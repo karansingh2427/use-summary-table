@@ -2491,9 +2491,9 @@ function renderQcGateReport(report) {
   qcGateEl.style.display = "flex";
   const blocked = !report.passed;
   qcGateEl.classList.toggle("error", blocked);
-  qcGateIconEl.textContent = blocked ? "⛔" : "✔";
+  qcGateIconEl.textContent = blocked ? "⚠" : "✔";
   qcGateTextEl.textContent = blocked
-    ? `QC blocked automatic result display: ${report.defects.length} issue(s) found (${report.counts.Critical || 0} Critical, ${report.counts.High || 0} High).`
+    ? `QC defects found: ${report.defects.length} issue(s) (${report.counts.Critical || 0} Critical, ${report.counts.High || 0} High). Review before using results.`
     : `QC passed: ${report.checkedRows} row(s) checked with no Critical/High issues.`;
 
   if (report.remediation && report.remediation.applied > 0) {
@@ -3539,9 +3539,9 @@ function finishRun(documents, totalPages, selectedAi) {
 
   statusEl.textContent = qcReport.passed
     ? `Done — ${documents.length} document(s), ${totalPages} page(s), ${allRows.length} row(s).`
-    : `QC blocked — ${documents.length} document(s), ${totalPages} page(s), ${allRows.length} row(s).`;
+    : `Done — ${documents.length} document(s), ${totalPages} page(s), ${allRows.length} row(s). QC defects found — review before using.`;
   noticeTx.textContent = !qcReport.passed
-    ? "Extraction finished but results were held back by the QC gate. Fix the listed defects and run again."
+    ? `Extraction complete with ${qcReport.defects.length} QC defect(s). Review the flagged issues before using results.`
     : bad.length === 0
     ? `Extraction complete. ${allRows.length} use row(s) across ${crops} use(s) from ${documents.length} document(s) (${totalPages} pages). ` +
       `Output is schema-verified: all ${SCHEMA.length} columns present in every row, no blanks. ` +
@@ -3552,21 +3552,15 @@ function finishRun(documents, totalPages, selectedAi) {
   noticeEl.classList.toggle("error", !qcReport.passed);
   if (bad.length) console.warn("[Extractor] non-compliant rows", bad);
   noticeEl.style.display = "flex";
-  if (qcReport.passed) {
-    startReviewFlow({
-      documents,
-      totalPages,
-      selectedAi,
-      qcReport,
-      remediation
-    });
-  } else {
-    clearReviewFlow();
-    resultsEl.style.display = "none";
-    placeholderEl.style.display = "block";
-    placeholderEl.textContent = "Results are withheld until QC passes.";
-    if (qcReport.defects.length) console.warn("[Extractor] QC gate blocked results", qcReport.defects);
-  }
+  // Always show results — QC defects are informational, not blocking.
+  startReviewFlow({
+    documents,
+    totalPages,
+    selectedAi,
+    qcReport,
+    remediation
+  });
+  if (qcReport.defects.length) console.warn("[Extractor] QC defects", qcReport.defects);
   runBtn.disabled = clearBtn.disabled = false;
 }
 
