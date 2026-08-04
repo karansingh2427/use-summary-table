@@ -140,6 +140,8 @@ _JACCARD_COLS = {
     _norm_col("Additional Restrictions for Use/Use Site"),
     _norm_col("Additional Information"),
     _norm_col("App. Equipment"),
+    _norm_col("App. Type"),
+    _norm_col("App. Timing (Site Status)"),
 }
 
 # Rate/quantity columns where rounding differences (0.36 vs 0.365) should be
@@ -241,7 +243,7 @@ def score(app_csv: str, gt_csv: str) -> None:
             app_val = app_row.get(app_col, "")
             if gt_val in ("", "NS", "NA") and app_val in ("", "NS", "NA"):
                 continue  # both empty/NS/NA — skip to avoid inflating scores
-            labels[label]["field_hits"]  += int(_fields_match(gt_val, app_val, gt_col))
+            labels[label]["field_hits"]  += int(_fields_match(gt_val, app_val, gt_col_to_app_col(gt_col)))
             labels[label]["field_total"] += 1
 
     # ---------------------------------------------------------------------------

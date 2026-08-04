@@ -962,9 +962,11 @@ const FIELD_PATTERNS = {
     /(Not\s+for\s+sale,?\s*(?:distribution\s*)?or\s+use\s+in\s+Nassau\s+and\s+Suffolk\s+Count(?:y|ies)[^.;\n]{0,90})/i
   ],
   // Drift parameters: wind speed, buffer distances, release height, droplet size.
+  // 'Buffers? (for|from|zone)' is generic — avoids matching 'buffer distance (for'
+  // which is a different paragraph structure.
   drift: [
     /(Wind\s+speed\s+limit[^.;\n]{0,80})/i,
-    /(Buffers?\s+for\s+(?:orchard|citrus|all|crops?|trees?|fruits?|vineyards?|aerial)[^.;\n]{0,120})/i,
+    /(Buffers?\s+(?:for|from|zone)[^.;\n]{0,120})/i,
     /(Max(?:imum)?\.?\s*Release\s+Height\s*\(?ft\)?\s*:?\s*\d+)/i,
     /(ASABE\s+Droplet\s+Size\s*:?\s*[A-Za-z]+(?:\s+or\s+[A-Za-z]+)?)/i,
     /(Max(?:imum)?\.?\s*boom\s+height\s*:?\s*[^.;\n]{0,30})/i
@@ -1583,9 +1585,9 @@ function rowFromBlock(useName, block, doc) {
   const geo   = geoBlock
     ? (doc.__restr.geo ? `${doc.__restr.geo}; ${geoBlock}` : geoBlock)
     : doc.__restr.geo;
-  // Block-specific drift wins; product-wide fallback excluded — it often picks
-  // up the wrong paragraph from a different crop or application type context.
-  const drift = allMatches(block, FIELD_PATTERNS.drift);
+  // Block-specific drift wins; product-wide is the fallback for labels where
+  // drift parameters appear once in a general section, not per-crop-section.
+  const drift = allMatches(block, FIELD_PATTERNS.drift) || doc.__restr.drift;
   const soil  = allMatches(block, FIELD_PATTERNS.soil);
   const nont  = allMatches(block, FIELD_PATTERNS.nonTarget) || doc.__restr.nont;
 
