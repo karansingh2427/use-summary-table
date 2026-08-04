@@ -991,29 +991,32 @@ const FIELD_PATTERNS = {
   // Changed [^.;\n] to [^.;] to allow embedded newlines in multi-line drift blocks,
   // and increased limits from 80-120 to 200-300 to capture complete statements.
   drift: [
-    /(Wind\s+speed\s+limit[^.;]{0,300})/i,
-    /(Buffers?\s+(?:for|from|zone|distance)[^.;]{0,350})/i,
-    /(Wind\s+conditions?[^.;]{0,250})/i,
-    /(Max(?:imum)?\.?\s*Release\s+Height\s*\(?ft\)?\s*:?[^.;]{0,80})/i,
-    /(ASABE\s+Droplet\s+Size\s*:?\s*[A-Za-z]+(?:\s+or\s+[A-Za-z]+)?[^.;]{0,80})/i,
-    /(Max(?:imum)?\.?\s*boom\s+height\s*:?\s*[^.;]{0,80})/i,
-    /(Aerial\s+application[^.;]{0,250})/i,
-    /(No\s+aerial\s+[^.;]{0,200})/i
+    // Structured drift table: "Wind speed limit (mph): ≤15 mph. Buffers for orchard (ft): Aerial 85-115"
+    // Allow period in middle so both wind-speed and buffer lines are captured together.
+    /(Wind\s+speed\s+limit[^•]{0,400})/i,
+    // Buffer table anchored on "(ft):" to avoid false match on "buffer distance"
+    /(Buffers?\s+for\s+[^•(]{0,60}\(ft\)[^•]{0,400})/i,
+    /(Wind\s+conditions?[^.;•]{0,250})/i,
+    /(Max(?:imum)?\.?\s*Release\s+Height\s*\(?ft\)?\s*:?[^.;•]{0,80})/i,
+    /(ASABE\s+Droplet\s+Size\s*:?\s*[A-Za-z]+(?:\s+or\s+[A-Za-z]+)?[^.;•]{0,80})/i,
+    /(Max(?:imum)?\.?\s*boom\s+height\s*:?\s*[^.;•]{0,80})/i,
+    /(Aerial\s+application[^.;•]{0,250})/i,
+    /(No\s+aerial\s+[^.;•]{0,200})/i
   ],
   // Real soil restrictions only. A bare "incorporat…" matched the Worker
   // Protection Standard paragraph and produced nonsense.
   // Changed [^.;\n] to [^.;] to allow embedded newlines in multi-line soil blocks,
   // and increased limits to 160-300 to capture complete soil prep instructions.
   soil: [
-    /(Any\s+soil\s+except[^.;]{0,250})/i,
-    /(DO\s+NOT\s+use\s+on\s+soils?\s+[^.;]{0,250})/i,
-    /(Place\s+(?:this\s+product|[A-Z][A-Za-z0-9\s®™.]+?)\s+\d[^.;]{0,200}inch[^.;]{0,200})/i,
-    /(For\s+(?:soil\s+)?(?:injection|drench|incorporation)[^.;]{0,250})/i,
-    /(DO\s+NOT\s+apply\s+to\s+water-?saturated\s+soils?[^.;]{0,200})/i,
-    /(Place\s+(?:the\s+)?product\s+\d[^.;]{0,200}below\s+(?:the\s+)?seed\s+line[^.;]{0,150})/i,
-    /(For\s+injection:\s*Place[^.;]{0,250})/i,
-    /(soil\s+incorporat\w+[^.;]{0,200})/i,
-    /(Soil\s+(?:type|preparation|texture|condition)[^.;]{0,200})/i
+    /(Any\s+soil\s+except[^.;•]{0,250})/i,
+    /(DO\s+NOT\s+use\s+on\s+soils?\s+[^.;•]{0,250})/i,
+    /(Place\s+(?:this\s+product|[A-Z][A-Za-z0-9\s®™.]+?)\s+\d[^.;•]{0,160}inch[^.;•]{0,160})/i,
+    /(For\s+(?:soil\s+)?(?:injection|drench|incorporation)[^.;•]{0,200})/i,
+    /(DO\s+NOT\s+apply\s+to\s+water-?saturated\s+soils?[^.;•]{0,200})/i,
+    /(Place\s+(?:the\s+)?product\s+\d[^.;•]{0,160}below\s+(?:the\s+)?seed\s+line[^.;•]{0,100})/i,
+    /(For\s+injection:\s*Place[^.;•]{0,200})/i,
+    /(soil\s+incorporat\w+[^.;•]{0,150})/i,
+    /(Soil\s+(?:type|preparation|texture|condition)[^.;•]{0,200})/i
   ],
   nonTarget: [
     /(Highly\s+toxic\s+to\s+adult\s+Megachile[^.;]{0,400})/i,
@@ -1553,6 +1556,10 @@ function rowFromBlock(useName, block, doc) {
   if (row["Max No. of CC/yr"] === "1") {
     if (row["Max # Apps/C.C."] === NOT_SPECIFIED && row["Max # Apps/Yr."] !== NOT_SPECIFIED) {
       row["Max # Apps/C.C."] = row["Max # Apps/Yr."];
+    }
+    // When only 1 crop cycle per year, Apps/Yr = Apps/C.C. (same season)
+    if (row["Max # Apps/Yr."] === NOT_SPECIFIED && row["Max # Apps/C.C."] !== NOT_SPECIFIED) {
+      row["Max # Apps/Yr."] = row["Max # Apps/C.C."];
     }
     if (row["A.I. Max Total Rate/C.C. (lb a.i./A)"] === NOT_SPECIFIED && row["A.I. Max Total Rate/Yr. (lb a.i./A)"] !== NOT_SPECIFIED) {
       row["A.I. Max Total Rate/C.C. (lb a.i./A)"] = row["A.I. Max Total Rate/Yr. (lb a.i./A)"];
