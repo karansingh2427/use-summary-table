@@ -991,17 +991,13 @@ const FIELD_PATTERNS = {
   // Changed [^.;\n] to [^.;] to allow embedded newlines in multi-line drift blocks,
   // and increased limits from 80-120 to 200-300 to capture complete statements.
   drift: [
-    // Structured drift table: "Wind speed limit (mph): ≤15 mph. Buffers for orchard (ft): Aerial 85-115"
-    // Allow period in middle so both wind-speed and buffer lines are captured together.
+    // Structured drift table — allow period so wind-speed and buffer lines are captured together.
     /(Wind\s+speed\s+limit[^•]{0,400})/i,
-    // Buffer table anchored on "(ft):" to avoid false match on "buffer distance"
+    // Buffer table anchored on "(ft):" to avoid false match on generic "buffer distance" prose.
     /(Buffers?\s+for\s+[^•(]{0,60}\(ft\)[^•]{0,400})/i,
-    /(Wind\s+conditions?[^.;•]{0,250})/i,
     /(Max(?:imum)?\.?\s*Release\s+Height\s*\(?ft\)?\s*:?[^.;•]{0,80})/i,
     /(ASABE\s+Droplet\s+Size\s*:?\s*[A-Za-z]+(?:\s+or\s+[A-Za-z]+)?[^.;•]{0,80})/i,
     /(Max(?:imum)?\.?\s*boom\s+height\s*:?\s*[^.;•]{0,80})/i,
-    /(Aerial\s+application[^.;•]{0,250})/i,
-    /(No\s+aerial\s+[^.;•]{0,200})/i
   ],
   // Real soil restrictions only. A bare "incorporat…" matched the Worker
   // Protection Standard paragraph and produced nonsense.
