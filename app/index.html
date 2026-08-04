@@ -1177,6 +1177,8 @@ function pickNamedAiRate(block, doc) {
   for (const m of String(block || "").matchAll(/(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)\s*\(\s*([^)\n]{3,60})\s*\)/g)) {
     const value = m[1].replace(/\s+/g, " ").trim();
     const ai = m[2].replace(/\s+/g, " ").trim();
+    // Skip EPA registration number false-positives (e.g. "PowerMAX® 3 (EPA Reg. No. 524-659; glyphosate)")
+    if (/\bReg\.\s*No\b|\bEPA\b|^\d+\s*[-–]\s*\d+\s*;/i.test(ai)) continue;
     const range = parseRateRange(value);
     if (!range) continue;
     named.push({ value, ai, high: range.high });
@@ -1282,9 +1284,9 @@ function buildEquipmentFromEvidence(text) {
   return null;
 }
 
-/** Parses "3.5 – 7.0" or "10.5" from a fl oz/A rate into {low, high}. */
+/** Parses "3.5 – 7.0", "11 to 27.4", or "10.5" from a fl oz/A rate into {low, high}. */
 function parseRateRange(str) {
-  const m = String(str).match(/([\d.]+)\s*(?:[-–]\s*([\d.]+))?/);
+  const m = String(str).match(/([\d.]+)\s*(?:(?:[-–]|to)\s*([\d.]+))?/);
   if (!m) return null;
   const low = parseFloat(m[1]);
   const high = m[2] !== undefined ? parseFloat(m[2]) : low;
@@ -1540,16 +1542,23 @@ function rowFromBlock(useName, block, doc) {
   // "Product Rate (fl oz/A) ... 3.5 – 7.0"
   const prodRateM = block.match(
     /Product\s+Rate\s*\(fl\s*oz\/A\)[^\d]{0,60}(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)/i);
-  // "Rate: 6.8 – 10.2 fl oz per acre" (Icafolin/herbicide table format)
+  // "Rate: 6.8 – 10.2 fl oz per acre" or "Rate: 11 to 27.4 fl oz per acre"
   const flOzRateM = !prodRateM && block.match(
-    /Rate:\s*([\d.]+(?:\s*[–\-]\s*[\d.]+)?)\s*fl\s*oz\s+per\s+acre/i);
+    /Rate:\s*([\d.]+(?:\s*(?:[–\-]|to)\s*[\d.]+)?)\s*fl\s*oz\s+per\s+acre/i);
+  // "Soybean 10.8 – 16.0 fl oz per acre" — crop-table format without Rate: keyword
+  const flOzBroadM = !prodRateM && !flOzRateM && block.match(
+    /\b([\d.]+(?:\s*(?:[–\-]|to)\s*[\d.]+)?)\s*fl\s*oz\s+per\s+acre/i);
   // "Do not apply more than 14 fl oz of SIVANTO 400 SL"
   const capM = block.match(
     /(?:do\s+not\s+apply\s+more\s+than|maximum(?:\s+of)?)\s*(\d+(?:\.\d+)?)\s*fl\s*oz/i);
 
   if (conc) {
-    const rateStr = prodRateM ? prodRateM[1] : (flOzRateM ? flOzRateM[1] : null);
-    if (!lbAi && rateStr) {
+    const rateStr = prodRateM ? prodRateM[1]
+      : (flOzRateM ? flOzRateM[1]
+      : (flOzBroadM ? flOzBroadM[1] : null));
+    // Explicit fl oz rate (Icafolin-style) wins over ambiguous lb ai/A matches in restriction clauses.
+    const icafolinFl = !!(flOzRateM || flOzBroadM);
+    if ((!lbAi || icafolinFl) && rateStr) {
       const r = parseRateRange(rateStr);
       if (r) {
         const lo = flOzToLbAi(r.low, conc);
@@ -2011,25 +2020,24 @@ function findTableRowSections(text) {
     .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
     .join('|');
 
-  // Strategy 1: crop term followed by APPLICATION TIMING, Rate:, or a rate-table marker.
-  // This works even when crops appear inline in a single-line page string.
+  // Strategy 1: crop term (with optional parenthetical qualifier) followed by APPLICATION
+  // TIMING/DIRECTIONS/Rate: — works even when crops appear inline in a single-line page string.
   const contextRe = new RegExp(
-    '\\b(' + cropTermPattern + ')\\s+(?=(?:APPLICATION\\s+(?:TIMING|RATE|INSTRUCTIONS?)|Rate:|RATES?:))',
+    '\\b(' + cropTermPattern + '(?:\\s*\\([^)]{1,50}\\))?)\\s+(?=(?:APPLICATION\\s+(?:TIMING|RATE|INSTRUCTIONS?|DIRECTIONS)|Rate:|RATES?:))',
     'gim'
   );
 
   // Strategy 2: crop term at the start of a line or after a page-number prefix.
-  // Handles standalone headings and inline headings after \n\n page breaks.
   const CONTINUATION = 'APPLICATION|CROPS|RESTRICTIONS|PRECAUTIONS|PREPLANT|POST-PLANT|SPECIFIC|DOSE|RATE|USE|\n';
   const lineStartRe = new RegExp(
     '(?:^|\\n|\\f|\\x0c)\\s*(?:\\d{1,2}\\s+)?(' + cropTermPattern + ')\\s*(?=(?:' + CONTINUATION + '))',
     'gim'
   );
 
-  // Strategy 3: "APPLICATION DIRECTIONS FOR USE IN [CROP]" format (fruit/vine labels)
+  // Strategy 3: "APPLICATION DIRECTIONS FOR USE IN [CROP]" — inline anywhere in text
   const appDirRe = new RegExp(
-    '(?:^|\\n)\\s*APPLICATION\\s+DIRECTIONS\\s+FOR\\s+USE\\s+IN\\s+(' + cropTermPattern + ')',
-    'gim'
+    '\\bAPPLICATION\\s+DIRECTIONS\\s+FOR\\s+USE\\s+IN\\s+(' + cropTermPattern + ')',
+    'gi'
   );
 
   const candidates = [];
@@ -2038,11 +2046,12 @@ function findTableRowSections(text) {
   const searchText = text.slice(triggerPos);
   const searchOffset = triggerPos;
 
-  // Apply all three strategies and deduplicate by crop name
+  // Dedup key strips trailing qualifier so "FIELD CORN (Grain and Silage)" and
+  // "Field Corn Rate:" both map to the same key and produce a single section.
   const addCandidate = (cropName, pos) => {
     const clean = cleanUseName(cropName);
     if (!clean || clean.length < 3) return;
-    const key = clean.toLowerCase();
+    const key = clean.replace(/\s*\([^)]{1,60}\)\s*$/, '').toLowerCase().trim();
     if (seen.has(key)) return;
     seen.add(key);
     candidates.push({ name: clean, pos: searchOffset + pos });
@@ -2059,9 +2068,8 @@ function findTableRowSections(text) {
 
   for (let i = 0; i < candidates.length; i++) {
     const { name, pos: start } = candidates[i];
-    const end = i + 1 < candidates.length
-      ? candidates[i + 1].pos
-      : Math.min(text.length, start + 3000);
+    // Last section extends to end-of-document so per-crop restrictions on later pages are captured.
+    const end = i + 1 < candidates.length ? candidates[i + 1].pos : text.length;
     out.push({ useName: name, target: 'SOIL', start, end, detector: 'allcaps-crop-heading' });
   }
 
