@@ -764,7 +764,7 @@ const CROP_TERMS = [
   "Grain Sorghum","Guar","Hay","Hemp","Jojoba","Kenaf","Lespedeza","Millet","Milo","Oat","Pasture",
   "Peanut","Popcorn","Rangeland","Rapeseed","Rice","Rye","Safflower","Sesame","Sorghum","Soybean",
   "Sugar Beet","Sugarcane","Sunflower","Sweet Corn","Timothy","Tobacco","Triticale","Vetch","Wheat",
-  "Wild Rice",
+  "Wild Rice","Forages","Forage Crops","Legume Forage",
   // --- Pome & stone fruit ---
   "Apple","Apricot","Cherry","Crabapple","Loquat","Nectarine","Peach","Pear","Plum","Plumcot",
   "Prune","Quince",
@@ -791,6 +791,7 @@ const CROP_TERMS = [
   "Radicchio","Rhubarb","Spinach","Swiss Chard","Watercress",
   // --- Fruiting vegetables ---
   "Eggplant","Ground Cherry","Okra","Pepino","Pepper","Bell Pepper","Chili Pepper","Tomatillo","Tomato",
+  "Eggplants","Peppers","Bell Peppers","Chili Peppers","Tomatillos","Tomatoes",
   // --- Cucurbits ---
   "Cantaloupe","Chayote","Cucumber","Gourd","Honeydew","Melon","Muskmelon","Pumpkin","Squash",
   "Summer Squash","Watermelon","Winter Squash","Zucchini",
@@ -806,8 +807,8 @@ const CROP_TERMS = [
   "Artichoke","Asparagus","Bamboo Shoot","Cardoon","Fennel","Palm Heart","Sugar Apple",
   // --- Herbs & spices ---
   "Anise","Basil","Bay Leaf","Caraway","Cardamom","Chamomile","Cilantro","Coriander","Cumin","Dill",
-  "Herbs","Lavender","Lemongrass","Marjoram","Mint","Oregano","Peppermint","Rosemary","Saffron",
-  "Sage","Savory","Spearmint","Tarragon","Thyme","Vanilla",
+  "Herbs","Spices","Lavender","Lemongrass","Marjoram","Mint","Oregano","Peppermint","Rosemary","Saffron",
+  "Sage","Savory","Spearmint","Tarragon","Thyme","Vanilla","Basils","Mints","Herbs and Spices",
   // --- Turf, ornamental & non-crop ---
   "Bentgrass","Bermudagrass","Bluegrass","Christmas Tree","Conifer","Fescue","Flowers","Grass",
   "Ground Cover","Nursery Stock","Ornamentals","Ryegrass","Shade Tree","Shrubs","Sod","Turf",
@@ -863,14 +864,15 @@ const FIELD_PATTERNS = {
 
   // --- Application method ---
   appTarget: [
-    /\b(Foliage\s*\/\s*Plant(?:\s*\(Weeds\))?)\b/i,
-    /\b(Seed\s+Treatment)\b/i,
+    /\b(Foliage\s*\/\s*Plant(?:\s*\(Weeds\))?|Foliage(?:\s+and)?\s+Plant)\b/i,
+    /\b(Seed\s+Treatment|Seed\s+Treatment\s+(?:\(In-)?Furrow)?)\b/i,
     /\b(Chemigation)\b/i,
-    /\b(Foliar)\b/i,
-    /\b(Soil)\b/i
+    /\b(Foliar(?:\s+Spray)?)\b/i,
+    /\b(Soil(?:\s+Drench)?|Ground)\b/i,
+    /\b(Plant\s+(?:Foliage|Trunk)|Crown)\b/i
   ],
   appType: [
-    /\b(Broadcast(?:,\s*Directed,?\s*or\s*Shielded\s*Spray)?|Banded?|Soil\s+Drench|Drench|In-?furrow(?:\s+spray)?|Directed\s+Spray|Shielded\s+Spray|Injection|Side-?dress|Chemigation|Dip)\b/i
+    /\b(Broadcast(?:,\s*Directed,?\s*or\s*Shielded\s*Spray)?|Banded?|Soil\s+Drench|Drench|In-?furrow(?:\s+spray)?|Directed\s+Spray|Shielded\s+Spray|Injection|Side-?dress|Chemigation|Dip|Spot\s+Spray|Band\s+Application|Spot\s+Application)\b/i
   ],
   appEquipment: [
     /((?:Air-?blast|Airblast)[^.;]{0,150}?(?:similar\s+ground\s+equipment|ground\s+equipment)[^.;]{0,180}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
@@ -929,8 +931,10 @@ const FIELD_PATTERNS = {
   ],
   maxTotalYr: [
     /A\.?\s*I\.?\s*Max\s*Total\s*Rate\/?\s*(?:Yr\.?|Y\.?r\.?|Year|calendar\s*year)[^\d]{0,60}(\d+(?:\.\d+)?)/i,
-    /(?:do\s+not\s+(?:apply\s+)?(?:more\s+than|exceed)|maximum)[^.;]{0,60}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\s*\/?\s*A?)[^.;]{0,60}?per\s*(?:calendar\s*)?year/i,
-    /Total.*?Rate.*?per.*?year[^.;]{0,60}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\s*\/?\s*A?)/i
+    /(?:do\s+not\s+(?:apply\s+)?(?:more\s+than|exceed)|maximum)[^.;]{0,100}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\s*\/?\s*A?)[^.;]{0,60}?per\s*(?:calendar\s*)?year/i,
+    /Total.*?Rate.*?per.*?year[^.;]{0,100}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\s*\/?\s*A?)/i,
+    /(?:annual|yearly|per\s+year|per\s+calendar\s+year)[^.;]{0,60}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\/?\s*A(?:cre)?)[^.;]{0,30}?(?=\s*[A-Z]|$|\.|;)/i,
+    /maximum\s+total[^.;]{0,80}?per\s+(?:calendar\s+)?year[^.;]{0,30}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\/?\s*A)/i
   ],
   mri: [
     /(?:minimum\s+retreatment\s+interval|MRI)[^.;\n]{0,25}?(\d+\s*(?:days?)?)/i,
@@ -967,14 +971,19 @@ const FIELD_PATTERNS = {
   // the block it appears in and must never be copied onto every row; only a
   // genuinely product-wide statement may be used as a fallback.
   geographic: [
-    /(Only\s+[Ff]or\s+[Uu]se\s+in:?\s*[A-Z][^.;]{0,150})/,
-    /(DO\s+NOT\s+use\s+in\s+(?:the\s+)?(?:states?\s+of\s+)?[A-Z][^.;]{0,150})/
+    /(Only\s+[Ff]or\s+[Uu]se\s+in:?\s*[A-Z][^.;]{0,200})/,
+    /(DO\s+NOT\s+use\s+in\s+(?:the\s+)?(?:states?\s+of\s+)?[A-Z][^.;]{0,250})/,
+    /(Restricted\s+(?:to|from|in|on)[^.;]{0,200})/i,
+    /(Not\s+for\s+use\s+(?:in|on)[^.;]{0,250})/i,
+    /(Cannot\s+be\s+used\s+[^.;]{0,200})/i
   ],
   // The one geographic statement that really does apply to the whole product.
   geographicProduct: [
-    /(NY\s+restriction[^.;]{0,350})/i,
-    /(No\s+aerial\s+application\s+in\s+New\s+York\s+State[^.;]{0,50})/i,
-    /(Not\s+for\s+sale,?\s*(?:distribution\s*)?or\s+use\s+in\s+Nassau\s+and\s+Suffolk\s+Count(?:y|ies)[^.;]{0,150})/i
+    /(NY\s+restriction[^.;]{0,400})/i,
+    /(No\s+aerial\s+application\s+in\s+New\s+York\s+State[^.;]{0,100})/i,
+    /(Not\s+for\s+sale,?\s*(?:distribution\s*)?or\s+use\s+in\s+Nassau\s+and\s+Suffolk\s+Count(?:y|ies)[^.;]{0,200})/i,
+    /(Product\s+(?:cannot\s+)?be\s+used[^.;]{0,350})/i,
+    /(This\s+product\s+[^.;]{0,250}(?:cannot|restricted|limited)[^.;]{0,150})/i
   ],
   // Drift parameters: wind speed, buffer distances, release height, droplet size.
   // 'Buffers? (for|from|zone)' is generic — avoids matching 'buffer distance (for'
@@ -982,25 +991,29 @@ const FIELD_PATTERNS = {
   // Changed [^.;\n] to [^.;] to allow embedded newlines in multi-line drift blocks,
   // and increased limits from 80-120 to 200-300 to capture complete statements.
   drift: [
-    /(Wind\s+speed\s+limit[^.;]{0,200})/i,
-    /(Buffers?\s+(?:for|from|zone)[^.;]{0,300})/i,
-    /(Max(?:imum)?\.?\s*Release\s+Height\s*\(?ft\)?\s*:?\s*\d+)/i,
-    /(ASABE\s+Droplet\s+Size\s*:?\s*[A-Za-z]+(?:\s+or\s+[A-Za-z]+)?)/i,
-    /(Max(?:imum)?\.?\s*boom\s+height\s*:?\s*[^.;]{0,60})/i
+    /(Wind\s+speed\s+limit[^.;]{0,300})/i,
+    /(Buffers?\s+(?:for|from|zone|distance)[^.;]{0,350})/i,
+    /(Wind\s+conditions?[^.;]{0,250})/i,
+    /(Max(?:imum)?\.?\s*Release\s+Height\s*\(?ft\)?\s*:?[^.;]{0,80})/i,
+    /(ASABE\s+Droplet\s+Size\s*:?\s*[A-Za-z]+(?:\s+or\s+[A-Za-z]+)?[^.;]{0,80})/i,
+    /(Max(?:imum)?\.?\s*boom\s+height\s*:?\s*[^.;]{0,80})/i,
+    /(Aerial\s+application[^.;]{0,250})/i,
+    /(No\s+aerial\s+[^.;]{0,200})/i
   ],
   // Real soil restrictions only. A bare "incorporat…" matched the Worker
   // Protection Standard paragraph and produced nonsense.
   // Changed [^.;\n] to [^.;] to allow embedded newlines in multi-line soil blocks,
   // and increased limits to 160-300 to capture complete soil prep instructions.
   soil: [
-    /(Any\s+soil\s+except[^.;]{0,200})/i,
-    /(DO\s+NOT\s+use\s+on\s+soils?\s+[^.;]{0,200})/i,
-    /(Place\s+(?:this\s+product|[A-Z][A-Za-z0-9\s®™.]+?)\s+\d[^.;]{0,160}inch[^.;]{0,160})/i,
-    /(For\s+(?:soil\s+)?(?:injection|drench|incorporation)[^.;]{0,200})/i,
-    /(DO\s+NOT\s+apply\s+to\s+water-?saturated\s+soils?[^.;]{0,150})/i,
-    /(Place\s+(?:the\s+)?product\s+\d[^.;]{0,160}below\s+(?:the\s+)?seed\s+line[^.;]{0,80})/i,
-    /(For\s+injection:\s*Place[^.;]{0,200})/i,
-    /(soil\s+incorporat\w+[^.;]{0,150})/i
+    /(Any\s+soil\s+except[^.;]{0,250})/i,
+    /(DO\s+NOT\s+use\s+on\s+soils?\s+[^.;]{0,250})/i,
+    /(Place\s+(?:this\s+product|[A-Z][A-Za-z0-9\s®™.]+?)\s+\d[^.;]{0,200}inch[^.;]{0,200})/i,
+    /(For\s+(?:soil\s+)?(?:injection|drench|incorporation)[^.;]{0,250})/i,
+    /(DO\s+NOT\s+apply\s+to\s+water-?saturated\s+soils?[^.;]{0,200})/i,
+    /(Place\s+(?:the\s+)?product\s+\d[^.;]{0,200}below\s+(?:the\s+)?seed\s+line[^.;]{0,150})/i,
+    /(For\s+injection:\s*Place[^.;]{0,250})/i,
+    /(soil\s+incorporat\w+[^.;]{0,200})/i,
+    /(Soil\s+(?:type|preparation|texture|condition)[^.;]{0,200})/i
   ],
   nonTarget: [
     /(Highly\s+toxic\s+to\s+adult\s+Megachile[^.;]{0,400})/i,
