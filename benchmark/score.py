@@ -262,8 +262,15 @@ def score(app_csv: str, gt_csv: str) -> None:
             app_col = gt_col_to_app_col(gt_col)
             gt_val  = gt_row.get(gt_col, "")
             app_val = app_row.get(app_col, "")
-            if gt_val in ("", "NS", "NA") and app_val in ("", "NS", "NA"):
-                continue  # both empty/NS/NA — skip to avoid inflating scores
+            # Skip when GT has no value — analyst left blank or said NS/NA.
+            # App extracting content where GT is blank is not a precision error.
+            if gt_val in ("", "NS", "NA", "N/A", "na", "ns", "n/a"):
+                continue
+            # Skip when both sides are empty (avoids inflating scores).
+            if app_val in ("", "NS", "NA", "N/A", "na", "ns", "n/a"):
+                labels[label]["field_hits"]  += 0
+                labels[label]["field_total"] += 1
+                continue
             labels[label]["field_hits"]  += int(_fields_match(gt_val, app_val, gt_col_to_app_col(gt_col)))
             labels[label]["field_total"] += 1
 
