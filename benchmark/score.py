@@ -96,7 +96,7 @@ def _best_match(gt_row: dict, app_rows: list[dict]) -> dict | None:
         use_sim = _jaccard(gt_use, r.get("use", ""))
         if use_sim > best_score:
             best_score, best_row = use_sim, r
-    return best_row if best_score >= 0.3 else None
+    return best_row if best_score >= 0.2 else None
 
 def _norm_val(v: str) -> str:
     """Normalise a cell value — strip trademarks, punctuation, extra whitespace."""
@@ -116,9 +116,14 @@ def _norm_target(v: str) -> str:
     return _TARGET_MAP.get(n, n.split()[0] if n else "")
 
 def _word_set(v: str) -> set:
-    """Tokenise a normalised value into words, filtering short stop-words."""
+    """Tokenise a normalised value, filtering short stop-words. Strips trailing
+    's' for basic plural-insensitive matching (fruit/fruits, vegetable/vegetables)."""
     stops = {"and", "or", "the", "of", "for", "in", "a", "an", "to", "at", "by"}
-    return {w for w in re.findall(r"[a-z0-9]+", _norm_val(v)) if len(w) > 2 and w not in stops}
+    words = set()
+    for w in re.findall(r"[a-z0-9]+", _norm_val(v)):
+        if len(w) > 2 and w not in stops:
+            words.add(w.rstrip("s") if len(w) > 4 else w)  # stem plurals
+    return words
 
 def _jaccard(a: str, b: str) -> float:
     """Word-level Jaccard similarity — robust to minor wording differences."""
