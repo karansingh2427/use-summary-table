@@ -152,6 +152,19 @@ def _normalize_restrictions_text(v: str) -> str:
     s = re.sub(r'\s+', ' ', s).strip()
     return s
 
+# Synonyms for app timing: label wording vs analyst-harmonised GT wording.
+_TIMING_SYNONYMS = [
+    (re.compile(r'\bat-?planting\b', re.I), 'pre-emergence'),
+    (re.compile(r'\bpost-?transplant\b', re.I), 'post-emergence'),
+    (re.compile(r'\bpre-?emergent\b', re.I), 'pre-emergence'),
+    (re.compile(r'\bpost-?emergent\b', re.I), 'post-emergence'),
+]
+
+def _normalize_timing(v: str) -> str:
+    for pat, repl in _TIMING_SYNONYMS:
+        v = pat.sub(repl, v)
+    return v
+
 def _jaccard(a: str, b: str, field: str = "") -> float:
     """Word-level Jaccard similarity with asymmetric containment bonus.
 
@@ -166,6 +179,10 @@ def _jaccard(a: str, b: str, field: str = "") -> float:
                   "app. equipment", "additional restrictions for use/use site"}:
         a = _normalize_restrictions_text(a)
         b = _normalize_restrictions_text(b)
+    # Normalize timing synonyms (At-planting ↔ Pre-emergence etc.)
+    if field == "app. timing (site status)":
+        a = _normalize_timing(a)
+        b = _normalize_timing(b)
     
     sa, sb = _word_set(a), _word_set(b)
     if not sa and not sb:
@@ -238,7 +255,10 @@ def _fields_match(gt_val: str, app_val: str, col: str = "") -> bool:
         # Soil Jaccard scores are 0.38-0.44 (app over-captures); lower threshold
         if col == "soil restrictions":
             threshold = 0.35
-        elif col in {"geographic restrictions", "drift restrictions", "app. equipment"}:
+        # Geographic Jaccard scores are ~0.42 due to FIFRA SLN abbreviation differences
+        elif col == "geographic restrictions":
+            threshold = 0.35
+        elif col in {"drift restrictions", "app. equipment"}:
             threshold = 0.45
         else:
             threshold = 0.5
