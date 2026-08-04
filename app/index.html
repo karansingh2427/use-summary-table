@@ -1283,7 +1283,14 @@ function allMatches(text, patterns) {
     const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
     for (const m of text.matchAll(g)) {
       const v = (m[1] || "").replace(/\s+/g, " ").trim();
-      if (v && !out.includes(v)) out.push(v);
+      // Skip if already captured: exact duplicate, or v is a substring of an existing entry,
+      // or an existing entry is a substring of v (replace shorter with longer).
+      if (!v) continue;
+      const subsumed = out.some(x => x.includes(v));
+      if (subsumed) continue;
+      // If v contains an existing shorter entry, replace it with v.
+      const replaced = out.findIndex(x => v.includes(x) && x.length < v.length);
+      if (replaced >= 0) { out[replaced] = v; } else { out.push(v); }
     }
   }
   return out.length ? out.join("; ") : null;
