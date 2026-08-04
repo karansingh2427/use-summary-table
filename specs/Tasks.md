@@ -76,11 +76,16 @@ R14 = Inline editing · R15 = OCR fallback · R16 = Expanded crop vocabulary · 
     Satisfies: R7 (retired)
     Done when: Feature removed from product scope to reduce defect surface; no run persistence remains in the UI.
 
-[ ] Task 27: Detect and parse table-structured use sections
+[x] Task 27: Detect and parse table-structured use sections
     Satisfies: R29
     Done when: Uploading a table-structured label (e.g. Icafolin-methyl USH679SC200) produces
     one row per crop row in the use table with rates, MRI, REI, and Max # Apps/Yr filled.
     The existing narrative-section extraction must still work for SIVANTO-style labels.
+    Outcome: USH679SC200 now produces 5 rows (SOYBEAN, Field Corn, CEREALS, CANOLA AND PULSE,
+    FRUIT TREE TREE NUT AND OTHER CROPS) with rates, timing, max apps filled. SIVANTO 400 SL
+    still produces 44 rows — no regression. Root cause was PDF.js joining all items per page
+    with spaces (no newlines), requiring context-based crop detection using APPLICATION TIMING
+    or Rate: following the crop term rather than line-start detection.
 
 
     Satisfies: R9, R10 (retired)
