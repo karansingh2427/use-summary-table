@@ -94,6 +94,11 @@ For each column, scan the whole column before moving on:
       droplet size, pollinator timing) are `NA` on rows whose application method they can't
       reach (soil/chemigation/drench); crop-scoped restrictions don't leak onto unrelated rows
       (the D11 defect — worse than a blank cell, because it reads as verified)
+- [ ] **Season=year convention (R-15)** — `Max # Apps/Yr.` and `Max No. of CC/yr` are filled
+      (not left `NS`) when the label caps applications per crop season and that crop, under
+      the label's own stated timing, has only one season/year; confirm the row's derivation
+      note cites R-15 rather than presenting it as a verbatim label value; confirm it is left
+      `NS` where the label itself shows more than one season/year is possible
 
 ### Pass 3 — Row-wise verification
 - [ ] Sample rows for verification: **all Low-confidence rows**, plus a spread of Medium

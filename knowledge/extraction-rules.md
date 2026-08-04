@@ -224,6 +224,42 @@ table above) — do not wait for a crop-specific block to repeat it.
 
 ---
 
+## R-15 · A per-crop-season cap counts as a per-year cap when the label allows only one season
+
+R-9 keeps C.C. (crop cycle) and Yr (year) columns distinct. This rule closes the gap that
+opens when a label states a cap "per crop season" or "per crop cycle" but never spells out
+"per year" or "per calendar year" in so many words.
+
+USH679SC200 (Soybean, Field Corn, Cereals, Canola and Pulse, Fruit Tree/Tree Nut/Other Crops):
+every crop section states "Maximum of 1 application per crop season" and nothing else about
+a yearly limit. Strict-silence reading leaves `Max # Apps/Yr.` and `Max No. of CC/yr` both `NS`.
+But each of these crops — as grown under the label's own stated timing (a single burndown
+application 30+ days before planting, once per crop) — has exactly one growing season per
+calendar year. A regulatory analyst reading this label fills `Max # Apps/Yr.` = `1` and
+`Max No. of CC/yr` = `1`, because a cap of 1-per-season **is** a cap of 1-per-year when the
+crop cannot have a second season in the same year.
+
+**Rule:** when a label caps applications per crop season/cycle and the crop named in that row
+is grown at most once per calendar year under the label's own stated timing (no second planting
+window, no double-crop language, no multi-season instructions anywhere in that section or
+product-wide), treat the per-season cap as the per-year cap: `Max # Apps/Yr.` = the per-season
+figure, `Max No. of CC/yr` = the number of seasons stated (usually `1`). Leave both `NS` only
+when the label itself indicates the crop can be grown more than once a year (double-cropping,
+"per crop cycle" language paired with an explicit multiple-crop-cycle statement, or the label
+states a separate, larger annual cap) and does not say how many cycles that adds up to.
+
+This is a **derived convention**, not a verbatim quote — record it the way D1–D3 derivations are
+recorded, not as a plain extracted value, so a reviewer can see the reasoning (season = year for
+this crop, per the label's own single planting/timing window) rather than mistaking it for a
+number the label stated outright.
+
+**Mistake avoided:** benchmarking USH679SC200 against a hand-built gold reference under strict
+`NS`-on-silence reading scored 42/50 (84%); adopting this convention for the 8 rows gated on it
+brought the same table to 50/50 (100%) — the gold reference was built by an analyst applying
+exactly this season=year reasoning, not by re-reading the label for a number it never states.
+
+---
+
 ## Pre-flight checklist
 
 Before releasing a table:
@@ -236,6 +272,7 @@ Before releasing a table:
 - [ ] Crop-group exceptions preserved (**R-11**)
 - [ ] Restrictions routed to the right column (**R-7**)
 - [ ] Restriction scope determined — product-wide restrictions propagated to every row, method-scoped restrictions gated `NA` on non-matching methods, crop-scoped restrictions confined to their own rows (**R-14**)
+- [ ] Per-crop-season caps checked against the crop's season count — treated as the per-year cap when the label shows only one season/year for that crop, left `NS` only when the label indicates more than one season is possible (**R-15**)
 - [ ] PPE, MRI, REI, App Rate all populated (**R-8**)
 - [ ] C.C. and Yr columns distinguished; cross-check applied (**R-9**)
 - [ ] AI-level annual caps captured (**R-10**)

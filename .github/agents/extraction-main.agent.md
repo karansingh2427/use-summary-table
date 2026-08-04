@@ -102,6 +102,12 @@ page:
     reach (soil injection, chemigation, drench). Crop-scoped restrictions stay confined to
     rows built from that crop's own section — copying one onto unrelated rows is fabrication,
     worse than an empty cell (R-5, D11).
+  - R-15: a per-crop-season/cycle cap counts as the per-year cap when that crop, under the
+    label's own stated timing, is grown at most once per calendar year (no double-crop or
+    multi-season language in that section or product-wide). Fill `Max # Apps/Yr.` and
+    `Max No. of CC/yr` from the season cap in that case; leave both `NS` only when the label
+    itself shows the crop can have more than one season/year and doesn't state how many.
+    Record this as a derivation (like D1–D3), not a verbatim quote.
   - R-9/R-10: keep Max # Apps/C.C. distinct from Max # Apps/Yr.; capture AI-level annual caps
     in Additional Information even when they override the per-product math.
   - R-11: preserve the crop's group code and any exception (`TREE NUTS (Crop Group 14-12) -
@@ -131,7 +137,8 @@ locked:
 - Rates carry their active-ingredient abbreviations and preserve ranges and conditions.
 - PHI is in days; REI is in hours.
 - `Max No. of CC/yr` follows Rule 5.1 (calendar-year cap → 1; crop-season cap with
-  stated seasons/yr → that value; otherwise → NS).
+  stated seasons/yr → that value; otherwise → NS), with R-15 applied first: a per-season
+  cap on a crop grown at most once/year is filled as the per-year cap, not left `NS`.
 - Every restriction is in the correct restriction column (geographic vs drift vs soil vs
   non-target vs additional), and at the correct scope (R-14): product-wide restrictions appear
   on every row, method-scoped ones are `NA` where the method doesn't apply, crop-scoped ones
@@ -169,6 +176,9 @@ Before generating the handoff package, confirm:
 - [ ] Restriction scope applied correctly (R-14): product-wide restrictions propagated to every
       row, method-scoped restrictions `NA` on non-matching methods, crop-scoped restrictions not
       leaked onto unrelated rows
+- [ ] Season=year convention applied where it fires (R-15): per-crop-season caps filled as the
+      per-year cap for crops grown at most once/year, left `NS` only where the label itself shows
+      more than one season is possible
 
 Optionally, you may run `app/index.html` against the same PDF(s) purely as a second-opinion
 completeness check: if its coverage warnings surface a crop or section your inventory missed,
@@ -218,7 +228,7 @@ Return exactly these sections:
 - Row counts per label and combined
 
 5. Self-Verification Checklist Result
-- Pass or Fail for each of the eight checklist items in Step 6
+- Pass or Fail for each of the nine checklist items in Step 6
 - Any item that did not pass: describe the gap
 
 6. Warnings
