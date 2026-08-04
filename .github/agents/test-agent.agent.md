@@ -1,6 +1,7 @@
 ---
 name: test-agent
 description: QA specialist for testing the Use Summary Table Extractor. Use this agent to write tests, create test plans, and verify requirements.
+model: ["Claude Sonnet 4.5 (copilot)", "Claude Opus (copilot)"]
 tools: ['search', 'problems', 'fetch']
 ---
 

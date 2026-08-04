@@ -23,7 +23,24 @@ The app runs by opening `app/index.html` directly in a browser. No build step, n
 **`knowledge/` is reference material only.** It is never loaded by the app at runtime, and
 nothing in it supplies facts about a product — only the source label PDF does that.
 
-## 2 · How to Make Changes
+## 2 · Model Selection for Agent Tasks
+
+When invoking Copilot agents for extraction, QC, and testing work, **model selection is
+automatic** based on task type:
+
+| Task | Primary Model | Fallback | Why |
+|------|---|---|---|
+| **PDF Extraction** (`extraction-main-agent`) | Claude Sonnet 4.5 | Claude Opus | Best at regulatory text parsing, complex workflows, structured output |
+| **Quality Control** (`QC-agent`) | Claude Sonnet 4.5 | Claude Opus | Excels at accuracy verification and multi-field validation |
+| **Orchestration** (`orchestrator-agent`) | Claude Sonnet 4.5 | Claude Opus | Handles two-stage workflows with state coordination |
+| **Code Review** (`review-agent`) | Claude Sonnet 4.5 | GPT-4 | Strong pattern recognition and technical feedback |
+| **Testing** (`test-agent`) | Claude Sonnet 4.5 | Claude Opus | Logical test design and edge-case reasoning |
+| **Documentation** (`docs-agent`) | Claude Sonnet 4.5 | Claude Opus | Clear technical writing and structure |
+
+Each agent automatically selects its configured model. You don't need to specify a model;
+it happens transparently based on the agent you invoke.
+
+## 3 · How to Make Changes
 
 - **Check `specs/PRD.md` first.** Confirm the change maps to an existing requirement.
 - **Work one task at a time.** Small, self-contained edits — not sweeping rewrites.
@@ -34,7 +51,7 @@ nothing in it supplies facts about a product — only the source label PDF does 
 - **Keep the schema centralized.** `SCHEMA` in `app/index.html` is the single source of truth
   for columns; never hard-code column names elsewhere.
 
-## 3 · Do NOT Do These Things
+## 4 · Do NOT Do These Things
 
 - ❌ No backend server or database — everything stays client-side.
 - ❌ No login, authentication, or user accounts.
@@ -44,7 +61,7 @@ nothing in it supplies facts about a product — only the source label PDF does 
   (PDF.js and SheetJS via CDN are the only permitted libraries.)
 - ❌ No changes that aren't traceable to a requirement in `specs/PRD.md`.
 
-## 4 · When Asked to Add a New Feature
+## 5 · When Asked to Add a New Feature
 
 1. **Ask first:** should this be added to `specs/PRD.md` as a new requirement?
 2. **Add a task** to `specs/Tasks.md` with a `Satisfies:` line and a `Done when:` line.

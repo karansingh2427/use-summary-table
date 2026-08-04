@@ -1,6 +1,7 @@
 ---
 name: QC-agent
 description: QC agent to quality check extracted use summary table against PDF(s). Use this agent to check the excel/csv file row and column wise and compare it against relevant PDF(s).
+model: ["Claude Sonnet 4.5 (copilot)", "Claude Opus (copilot)"]
 ---
 
 # QC Agent

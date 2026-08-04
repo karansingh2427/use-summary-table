@@ -1,6 +1,7 @@
 ---
 name: orchestrator-agent
 description: Orchestrator for extraction workflow. Use when you want extraction run first, then mandatory QC by QC-agent, and only then a final user-facing result.
+model: ["Claude Sonnet 4.5 (copilot)", "Claude Opus (copilot)"]
 agents: [extraction-main-agent, QC-agent]
 user-invocable: true
 ---

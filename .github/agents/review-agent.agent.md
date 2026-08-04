@@ -1,6 +1,7 @@
 ---
 name: review-agent
 description: Code reviewer for maintaining quality standards. Use this agent to review code changes, suggest improvements, and check for issues.
+model: ["Claude Sonnet 4.5 (copilot)", "GPT-4 (copilot)"]
 tools: ['search', 'problems', 'usages', 'editFiles']
 ---
 
