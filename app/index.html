@@ -1969,6 +1969,60 @@ function findGenericAllCapsSections(text) {
   return out;
 }
 
+/** R29 — Detect use tables where each row is a crop/use (e.g. Icafolin labels).
+ *  Looks for lines with a crop term followed by rate-like numbers and REI values.
+ *  Returns one section per table row, using the surrounding block as the section text.
+ */
+function findTableRowSections(text) {
+  const out = [];
+  // Split into lines, scan for table-like rows:
+  // a crop term at line start followed by rate numbers within the same line.
+  const lines = text.split('\n');
+  const RATE_RE = /\d+\.\d+\s*(?:ICM|FLU|BXN|IDF|FFA|PYS|lb|oz)/i;
+  const REI_RE = /\b\d+\s*hours?\b/i;
+  const CROP_START_RE = new RegExp(
+    '^\\s*(' + CROP_TERMS_SORTED.slice(0, 200).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b',
+    'i'
+  );
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!CROP_START_RE.test(line)) continue;
+    // Check if this line or adjacent lines have rate-like data (table row indicator)
+    const context = lines.slice(Math.max(0, i-1), Math.min(lines.length, i+3)).join(' ');
+    if (!RATE_RE.test(context) && !REI_RE.test(context)) continue;
+
+    const cropMatch = line.match(CROP_START_RE);
+    const cropName = cropMatch[1].trim();
+
+    // Find position in original text
+    let pos = 0;
+    for (let j = 0; j < i; j++) pos += lines[j].length + 1;
+
+    // Section block: grab several lines as context for rate extraction
+    const blockLines = lines.slice(i, Math.min(lines.length, i + 15));
+    const blockText = blockLines.join('\n');
+
+    out.push({
+      useName: cropName,
+      target: /\bsoil\b|below.*(seed|root)|incorporat/i.test(blockText) ? 'SOIL' : 'FOLIAR',
+      start: pos,
+      end: pos + blockText.length,
+      detector: 'table-row',
+      tableRowText: blockText
+    });
+  }
+
+  // Deduplicate by crop name — keep only the first occurrence per crop
+  const seen = new Set();
+  return out.filter(s => {
+    const key = s.useName.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /** Finds every use section in the label, with its text span. */
 function findUseSections(text) {
   const found = [];
@@ -2001,6 +2055,12 @@ function findUseSections(text) {
   // Last fallback: generic all-caps crop/use headings ending in "Pest Controlled".
   if (!found.length) {
     found.push(...findGenericAllCapsSections(text));
+  }
+
+  // R29: If still no sections, try table-row detection for labels that list
+  // crops as rows in an embedded use table rather than as narrative headings.
+  if (!found.length) {
+    found.push(...findTableRowSections(text));
   }
 
   // Slice each section up to the start of the next one. The final section is

@@ -223,6 +223,18 @@ This does not weaken R19: the tool still never invents a fact the label does not
 App. Type `Broadcast`, App. Timing `Post-emergence`, each flagged as derived, and the run log
 names the rule behind each.
 
+**R29 · Generic label structure support.** The extractor must work regardless of how a label
+organises its use information — narrative section headings, inline use tables, or mixed formats.
+When a label presents crops and rates as rows in an embedded use table (e.g. a column labelled
+"Use Site" or "Crop" with one row per crop, and adjacent columns for rates and intervals),
+the tool must detect the table, iterate its rows, and produce one output row per crop/use
+combination. The resulting rows must be schema-complete, with rates and intervals mapped from
+the table columns, not left as NS because no narrative section heading was found.
+*Verify:* Upload a table-structured label (e.g. Icafolin-methyl / USH679SC200). The output
+contains one row per crop listed in the label's use table (Soybean, Field Corn, Cereals,
+Canola/Pulse, Fruit Tree/Tree Nut), with rates, MRI, REI, and Max # Apps/Yr filled from
+the table — not NS.
+
 ### Boundaries
 
 The tool runs entirely in the browser. There is no server, no database, no sign-in, and no outside
