@@ -1768,6 +1768,9 @@ function findProductName(text) {
     || head.match(/\b([A-Z][A-Za-z]{2,}\s*[®™](?:\s*[A-Z]{2,8})?)/)
     // "SIVANTO® 400" or a bare "SIVANTO®"
     || head.match(/\b([A-Z][A-Za-z]{2,}\s*[®™](?:\s*\d{2,4})?)/)
+    // Pending/unregistered EPA submissions carry no ®/™ at all — they use an
+    // Alternate Brand Name bracket instead, e.g. "[ABN: VELNEXA PRIME]".
+    || head.match(/\[\s*ABN\s*:\s*([A-Z][A-Za-z\s]{2,40}?)\s*\]/)
     // Fall back to an ALL-CAPS name followed by a product-class word.
     || head.match(/\b([A-Z][A-Z0-9\s\-]{3,40}?)\s+(?:Herbicide|Insecticide|Fungicide)\b/);
   if (!m) return null;
@@ -2181,8 +2184,11 @@ function deriveUseSite(block, target, headingTarget) {
     return ["Residential (Outdoor)", "D1.3"];
   }
   // D1.4 — a per-acre rate plus field equipment means an outdoor field use.
+  // Broadcast/banded spray wording is field-method evidence too — herbicide labels
+  // often state it per-crop-block without repeating "ground boom"/"aerial" locally
+  // (the application method is described once, product-wide, in Directions For Use).
   const perAcre = has(block, /fl\s*oz\/A\b|Gallons?\s*\/?\s*Acre|per\s+acre\b|\blb\s*a\.?i\.?\/A/i);
-  const fieldKit = has(block, /\baerial\b|aircraft|ground\s+boom|ground\s+sprayers?|chemigation/i);
+  const fieldKit = has(block, /\baerial\b|aircraft|ground\s+boom|ground\s+sprayers?|chemigation|\bbroadcast\b|\bbanded?\b|band\s+application|ground\s+application/i);
   if (perAcre && fieldKit) return ["Agricultural (Outdoor)", "D1.4"];
   return [null, null];
 }
@@ -2684,7 +2690,11 @@ function canonicalizeAppTarget(value) {
 
 function inferTargetFromEvidence(text) {
   const hasSeed = /\bseed\s+treatment\b|seed\s+applied|seed\s+piece/i.test(text);
-  const hasSoil = /\bsoil\b|\bdrench\b|in-?furrow|\binject(?:ion|ed)?\b|\bdrip\b|\btrickle\b|\bchemigation\b|side-?dress|basal/i.test(text);
+  // Bare "soil" is too broad on its own — herbicide labels describe "soil residual
+  // activity" (mode of action) or seed "covered with soil" without meaning a soil
+  // application method, which falsely conflicted with clear foliar/broadcast evidence
+  // and left App. Target NS. Require an actual soil-method phrase instead.
+  const hasSoil = /\bsoil\s+(?:application|applied|incorporat\w*|surface\s+treatment)\b|\bdrench\b|in-?furrow|\binject(?:ion|ed)?\b|\bdrip\b|\btrickle\b|\bchemigation\b|side-?dress|basal/i.test(text);
   const hasFoliar = /\bfoliar\b|\baerial\b|aircraft|ground\s+sprayers?|ground\s+boom|air-?blast|broadcast/i.test(text);
   if (hasSeed) return "Seed Treatment";
   if (hasSoil && !hasFoliar) return "Soil";
