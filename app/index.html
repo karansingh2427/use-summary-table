@@ -1503,6 +1503,21 @@ function rowFromBlock(useName, block, doc) {
 
   row["Max No. of CC/yr"] = maxCropCyclesPerYear(block);
 
+  // Derive Max # Apps from Total Rate ÷ Single Rate when label states a rate cap
+  // but not an explicit application count. This mirrors analyst methodology and
+  // only fires when both inputs are known (arithmetic, not inference).
+  const _singleR = parseFloat(String(row["A.I. Max Single Rate/App. (lb a.i./A)"]).split(/[;,]/)[0].trim());
+  const _totalCC = parseFloat(String(row["A.I. Max Total Rate/C.C. (lb a.i./A)"]).trim());
+  const _totalYr = parseFloat(String(row["A.I. Max Total Rate/Yr. (lb a.i./A)"]).trim());
+  if (row["Max # Apps/C.C."] === NOT_SPECIFIED && isFinite(_singleR) && _singleR > 0 && isFinite(_totalCC)) {
+    const n = Math.round(_totalCC / _singleR);
+    if (n >= 1 && n <= 20) row["Max # Apps/C.C."] = String(n);
+  }
+  if (row["Max # Apps/Yr."] === NOT_SPECIFIED && isFinite(_singleR) && _singleR > 0 && isFinite(_totalYr)) {
+    const n = Math.round(_totalYr / _singleR);
+    if (n >= 1 && n <= 20) row["Max # Apps/Yr."] = String(n);
+  }
+
   if (row["Max No. of CC/yr"] === "1") {
     if (row["Max # Apps/C.C."] === NOT_SPECIFIED && row["Max # Apps/Yr."] !== NOT_SPECIFIED) {
       row["Max # Apps/C.C."] = row["Max # Apps/Yr."];
