@@ -1985,9 +1985,13 @@ function findGenericAllCapsSections(text) {
 }
 
 /** R29 — Detect crop-name section headings in labels that organise uses as
- *  crop sections (e.g. Icafolin). Works for both standalone headings ('SOYBEAN\n')
- *  and inline headings ('SOYBEAN APPLICATION TIMING...') as PDF.js sometimes
- *  concatenates a heading with the following subheading on the same text run.
+ *  crop sections (e.g. Icafolin). Works for:
+ *  1. Standalone headings on their own line ('SOYBEAN\n')
+ *  2. Inline headings with page-number prefix ('14 SOYBEAN APPLICATION TIMING...')
+ *  3. Table-row headings buried inside a single page string
+ *     ('CROPS RATE APPLICATION Field Corn Rate: 6.8 – 10.2 fl oz per acre ...
+ *      CEREALS APPLICATION TIMING ...') — the entire page is one long string
+ *     because PDF.js joins all text items on a page with spaces.
  */
 function findTableRowSections(text) {
   const out = [];
@@ -1998,52 +2002,52 @@ function findTableRowSections(text) {
   if (!triggerMatch) return out;
   const triggerPos = triggerMatch.index;
 
-  // Build a regex that matches a crop term at the start of a line OR preceded
-  // by a section separator (newline, form-feed, or page-number prefix like "14 ").
   const cropTermPattern = CROP_TERMS_SORTED.slice(0, 300)
     .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
     .join('|');
 
-  // Match: (start of line / newline / ff) + optional page-number prefix + crop term
-  // followed by: space+continuation-word OR newline OR end-of-string
-  // Handles both standalone heading ("SOYBEAN\n") and inline heading preceded by
-  // a PDF page-number prefix ("14 SOYBEAN APPLICATION TIMING...").
-  const CONTINUATION = 'APPLICATION|CROPS|RESTRICTIONS|PRECAUTIONS|PREPLANT|POST-PLANT|SPECIFIC|DOSE|RATE|USE|$|\\n';
-  const cropHeadingRe = new RegExp(
+  // Strategy 1: crop term followed by APPLICATION TIMING, Rate:, or a rate-table marker.
+  // This works even when crops appear inline in a single-line page string.
+  const contextRe = new RegExp(
+    '\\b(' + cropTermPattern + ')\\s+(?=(?:APPLICATION\\s+(?:TIMING|RATE|INSTRUCTIONS?)|Rate:|RATES?:))',
+    'gim'
+  );
+
+  // Strategy 2: crop term at the start of a line or after a page-number prefix.
+  // Handles standalone headings and inline headings after \n\n page breaks.
+  const CONTINUATION = 'APPLICATION|CROPS|RESTRICTIONS|PRECAUTIONS|PREPLANT|POST-PLANT|SPECIFIC|DOSE|RATE|USE|\n';
+  const lineStartRe = new RegExp(
     '(?:^|\\n|\\f|\\x0c)\\s*(?:\\d{1,2}\\s+)?(' + cropTermPattern + ')\\s*(?=(?:' + CONTINUATION + '))',
     'gim'
   );
 
-  // "APPLICATION DIRECTIONS FOR USE IN [CROP]" format (used by fruit/vine labels)
+  // Strategy 3: "APPLICATION DIRECTIONS FOR USE IN [CROP]" format (fruit/vine labels)
   const appDirRe = new RegExp(
-    '(?:^|\\n)\\s*(APPLICATION\\s+DIRECTIONS\\s+FOR\\s+USE\\s+IN\\s+(' + cropTermPattern + '))',
+    '(?:^|\\n)\\s*APPLICATION\\s+DIRECTIONS\\s+FOR\\s+USE\\s+IN\\s+(' + cropTermPattern + ')',
     'gim'
   );
 
   const candidates = [];
   const seen = new Set();
 
-  // Scan the text after the trigger for crop headings
   const searchText = text.slice(triggerPos);
   const searchOffset = triggerPos;
 
-  for (const m of searchText.matchAll(cropHeadingRe)) {
-    const cropName = cleanUseName(m[1]);
-    if (!cropName || cropName.length < 3) continue;
-    const key = cropName.toLowerCase();
-    if (seen.has(key)) continue;
+  // Apply all three strategies and deduplicate by crop name
+  const addCandidate = (cropName, pos) => {
+    const clean = cleanUseName(cropName);
+    if (!clean || clean.length < 3) return;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) return;
     seen.add(key);
-    candidates.push({ name: cropName, pos: searchOffset + m.index });
-  }
+    candidates.push({ name: clean, pos: searchOffset + pos });
+  };
 
-  for (const m of searchText.matchAll(appDirRe)) {
-    const cropName = cleanUseName(m[2] || m[1]);
-    if (!cropName || cropName.length < 3) continue;
-    const key = cropName.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    candidates.push({ name: cropName, pos: searchOffset + m.index });
-  }
+  for (const m of searchText.matchAll(contextRe))    addCandidate(m[1], m.index);
+  for (const m of searchText.matchAll(lineStartRe))  addCandidate(m[1], m.index);
+  for (const m of searchText.matchAll(appDirRe))     addCandidate(m[1], m.index);
+
+  if (!candidates.length) return out;
 
   // Sort by position and build sections
   candidates.sort((a, b) => a.pos - b.pos);
