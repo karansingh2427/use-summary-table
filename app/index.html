@@ -1969,58 +1969,67 @@ function findGenericAllCapsSections(text) {
   return out;
 }
 
-/** R29 — Detect use tables where each row is a crop/use (e.g. Icafolin labels).
- *  Looks for lines with a crop term followed by rate-like numbers and REI values.
- *  Returns one section per table row, using the surrounding block as the section text.
+/** R29 — Detect standalone ALL-CAPS crop headings in labels that list crops as
+ *  separate sections without a trailing FOLIAR/SOIL keyword (e.g. Icafolin labels
+ *  which have "SOYBEAN\n[directions]...\nFIELD CORN\n[directions]..." after the
+ *  "SPECIFIC CROP DIRECTIONS" header).
  */
 function findTableRowSections(text) {
   const out = [];
-  // Split into lines, scan for table-like rows:
-  // a crop term at line start followed by rate numbers within the same line.
   const lines = text.split('\n');
-  const RATE_RE = /\d+\.\d+\s*(?:ICM|FLU|BXN|IDF|FFA|PYS|lb|oz)/i;
-  const REI_RE = /\b\d+\s*hours?\b/i;
-  const CROP_START_RE = new RegExp(
-    '^\\s*(' + CROP_TERMS_SORTED.slice(0, 200).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b',
+
+  // Only scan sections that follow known "use-listing" headers.
+  const TRIGGER_RE = /SPECIFIC\s+CROP\s+DIRECTIONS|DIRECTIONS\s+FOR\s+USE|CROP\s+USE\s+DIRECTIONS|USE\s+DIRECTIONS/i;
+  const triggerIdx = lines.findIndex(l => TRIGGER_RE.test(l));
+  if (triggerIdx < 0) return out;
+
+  // An ALL-CAPS line is a crop heading if it:
+  //  - Consists only of uppercase letters, spaces, commas, slashes, parens, hyphens
+  //  - Is a known crop term (or starts with one)
+  //  - Is not a structural keyword (APPLICATION, RATE, RESTRICTIONS…)
+  const STRUCTURAL = /^(?:APPLICATION|RATE|CROPS|TIMING|RESTRICTIONS|PRECAUTIONS|COMPATIBILITY|RESISTANCE|ROTATIONAL|CROP\s+TOLERANCE|PRODUCT|USE\s+RESTRICTIONS|SPRAY\s+DRIFT|DIRECTIONS|SPECIFIC|STORAGE|DISPOSAL|FIRST\s+AID|PRECAUTIONARY|HAZARDS|PERSONAL|USER\s+SAFETY|ENGINEERING|ENVIRONMENTAL|MANDATORY|MANAGEMENT|LIABILITY|WARRANTY|INCIDENTAL|AGRICULTURAL)\b/i;
+
+  // Build a fast lookup: does the (case-insensitive) line start with a known crop?
+  const cropSet = new Set(CROP_TERMS_SORTED.map(t => t.toLowerCase()));
+  const cropRe = new RegExp(
+    '^(' + CROP_TERMS_SORTED.slice(0, 300).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b',
     'i'
   );
 
-  for (let i = 0; i < lines.length; i++) {
+  let pos = 0;
+  for (let j = 0; j < triggerIdx; j++) pos += lines[j].length + 1;
+
+  const candidates = [];
+  let linePos = pos;
+  for (let i = triggerIdx; i < lines.length; i++) {
     const line = lines[i];
-    if (!CROP_START_RE.test(line)) continue;
-    // Check if this line or adjacent lines have rate-like data (table row indicator)
-    const context = lines.slice(Math.max(0, i-1), Math.min(lines.length, i+3)).join(' ');
-    if (!RATE_RE.test(context) && !REI_RE.test(context)) continue;
+    const trimmed = line.trim();
+    linePos += line.length + 1;
 
-    const cropMatch = line.match(CROP_START_RE);
-    const cropName = cropMatch[1].trim();
+    if (trimmed.length < 3 || trimmed.length > 80) continue;
+    // Must be an all-caps line (headings only)
+    if (!/^[A-Z][A-Z0-9\s,\/\(\)\-–.]+$/.test(trimmed)) continue;
+    if (STRUCTURAL.test(trimmed)) continue;
+    // Must start with a crop term
+    if (!cropRe.test(trimmed)) continue;
 
-    // Find position in original text
-    let pos = 0;
-    for (let j = 0; j < i; j++) pos += lines[j].length + 1;
-
-    // Section block: grab several lines as context for rate extraction
-    const blockLines = lines.slice(i, Math.min(lines.length, i + 15));
-    const blockText = blockLines.join('\n');
-
-    out.push({
-      useName: cropName,
-      target: /\bsoil\b|below.*(seed|root)|incorporat/i.test(blockText) ? 'SOIL' : 'FOLIAR',
-      start: pos,
-      end: pos + blockText.length,
-      detector: 'table-row',
-      tableRowText: blockText
-    });
+    candidates.push({ name: cleanUseName(trimmed), pos: linePos - line.length - 1 });
   }
 
-  // Deduplicate by crop name — keep only the first occurrence per crop
+  if (!candidates.length) return out;
+
+  // Build sections: each section spans from its start to the next candidate start.
   const seen = new Set();
-  return out.filter(s => {
-    const key = s.useName.toLowerCase();
-    if (seen.has(key)) return false;
+  for (let i = 0; i < candidates.length; i++) {
+    const { name, pos: start } = candidates[i];
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
     seen.add(key);
-    return true;
-  });
+    const end = i + 1 < candidates.length ? candidates[i + 1].pos : Math.min(text.length, start + 3000);
+    out.push({ useName: name, target: 'SOIL', start, end, detector: 'allcaps-crop-heading' });
+  }
+
+  return out;
 }
 
 /** Finds every use section in the label, with its text span. */
