@@ -856,22 +856,19 @@ const FIELD_PATTERNS = {
     /\b(Broadcast(?:,\s*Directed,?\s*or\s*Shielded\s*Spray)?|Banded?|Soil\s+Drench|Drench|In-?furrow(?:\s+spray)?|Directed\s+Spray|Shielded\s+Spray|Injection|Side-?dress|Chemigation|Dip)\b/i
   ],
   appEquipment: [
-    /((?:Air-?blast|Airblast)[^.;\n]{0,90}?(?:similar\s+ground\s+equipment|ground\s+equipment)[^.;\n]{0,120}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
-    /((?:Air-?blast\s+sprayer|Air-?blast\s+sprayers?|Airblast\s+sprayer|Airblast\s+sprayers?)[^.;\n]{0,160}?(?:similar\s+ground\s+equipment|ground\s+equipment)[^.;\n]{0,160}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
-    /((?:Air-?blast\s+sprayer|Air-?blast\s+sprayers?|Airblast\s+sprayer|Airblast\s+sprayers?)[^.;\n]{0,120}?similar\s+ground\s+equipment[^.;\n]{0,120}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
+    /((?:Air-?blast|Airblast)[^.;]{0,150}?(?:similar\s+ground\s+equipment|ground\s+equipment)[^.;]{0,180}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
+    /((?:Air-?blast\s+sprayer|Air-?blast\s+sprayers?|Airblast\s+sprayer|Airblast\s+sprayers?)[^.;]{0,200}?(?:similar\s+ground\s+equipment|ground\s+equipment)[^.;]{0,200}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
+    /((?:Air-?blast\s+sprayer|Air-?blast\s+sprayers?|Airblast\s+sprayer|Airblast\s+sprayers?)[^.;]{0,180}?similar\s+ground\s+equipment[^.;]{0,180}?fixed\s+or\s+rotary\s+winged\s+aircraft)/i,
     // Prefer the full equipment sentence the label spells out, e.g.
     // "Ground sprayers, fixed or rotary winged aircraft, or through properly
     //  designed, sprinkler-type overhead chemigation equipment".
-    // The trailing bound must reach the end of "chemigation equipment" — at
-    // {0,60} the capture stopped mid-word on "…overhead chem", because the
-    // lazy middle matched "aircraft" and left 60 characters for a longer tail.
-    // Anchoring the alternation on the final noun keeps the sentence whole.
-    /((?:Ground\s+sprayers?|Air-?blast\s+sprayers?)[^.;\n]{0,200}?chemigation\s+equipment)/i,
-    /((?:Ground\s+sprayers?|Air-?blast\s+sprayers?)[^.;\n]{0,200}?aircraft[^.;\n]{0,80})/i,
+    // Changed [^.;\n] to [^.;] to allow embedded newlines; increased limits.
+    /((?:Ground\s+sprayers?|Air-?blast\s+sprayers?)[^.;]{0,280}?chemigation\s+equipment)/i,
+    /((?:Ground\s+sprayers?|Air-?blast\s+sprayers?)[^.;]{0,200}?aircraft[^.;]{0,120})/i,
     // "Apply using ..." — but only when it names actual equipment, otherwise
     // this swallowed tank-cleaning prose ("or a mix tank and drain for …").
-    /(?:Apply\s+(?:with|using))\s+([^.;\n]{0,120}?(?:sprayers?|aircraft|boom|equipment|chemigation)[^.;\n]{0,40})/i,
-    /\b((?:Air-?blast|Airblast)\s+sprayers?[^.;\n]{0,60}|Ground\s+(?:Equipment|sprayers?|boom)[^.;\n]{0,60}|fixed\s+or\s+rotary\s+winged\s+aircraft[^.;\n]{0,40}|boomless\s+ground\s+equipment|handheld\s+equipment)\b/i
+    /(?:Apply\s+(?:with|using))\s+([^.;]{0,180}?(?:sprayers?|aircraft|boom|equipment|chemigation)[^.;]{0,60})/i,
+    /\b((?:Air-?blast|Airblast)\s+sprayers?[^.;]{0,100}|Ground\s+(?:Equipment|sprayers?|boom)[^.;]{0,100}|fixed\s+or\s+rotary\s+winged\s+aircraft[^.;]{0,60}|boomless\s+ground\s+equipment|handheld\s+equipment)\b/i
   ],
   appTimingStatus: [
     /\b(Pre-?emergence\s*\/\s*Post-?emergence|Pre-?plant\s+surface|Post-?plant\s+pre-?emergence|Pre-?emergen(?:ce|t)|Post-?emergen(?:ce|t)|Post-?petal\s+fall|Pre-?transplant|At-?planting|Pre-?plant)\b/i
@@ -900,22 +897,23 @@ const FIELD_PATTERNS = {
     // This label states it as a labelled table cell.
     /Maximum\s+number\s+of\s+applications?\s+per\s+crop\s*(?:cycle|season)?\s*:?\s*(\d+)/i,
     /(\d+)\s*applications?\s*per\s*crop\s*(?:cycle|season)/i,
-    /maximum[^.;\n]{0,30}?(\d+)\s*applications?[^.;\n]{0,20}?per\s*crop/i,
+    /maximum[^.;]{0,30}?(\d+)\s*applications?[^.;]{0,20}?per\s*crop/i,
     /(?:make\s+)?no\s+more\s+than\s+(\d+)\s*applications?\s*per\s*crop/i,
     /(?:do\s+not\s+(?:make|apply)\s+more\s+than)\s*(\d+)\s*applications?/i
   ],
   maxAppsYr: [
-    /Maximum\s+number\s+of[^.;\n]{0,80}?applications?\s+per\s*(?:calendar\s*)?year\s*:?\s*(\d+)/i,
+    /Maximum\s+number\s+of[^.;]{0,80}?applications?\s+per\s*(?:calendar\s*)?year\s*:?\s*(\d+)/i,
     /(\d+)\s*applications?\s*per\s*(?:calendar\s*)?year/i,
-    /maximum[^.;\n]{0,30}?(\d+)\s*applications?[^.;\n]{0,20}?per\s*year/i
+    /maximum[^.;]{0,30}?(\d+)\s*applications?[^.;]{0,20}?per\s*year/i
   ],
   maxTotalCC: [
-    /A\.?\s*I\.?\s*Max\s*Total\s*Rate\/?\s*C\.?\s*C\.?[^\d\n]{0,40}(\d+(?:\.\d+)?)/i,
-    /(?:do\s+not\s+(?:apply\s+)?(?:more\s+than|exceed)|maximum)[^.;\n]{0,40}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\s*\/?\s*A?)[^.;\n]{0,25}?per\s*crop\s*(?:cycle|season)/i
+    /A\.?\s*I\.?\s*Max\s*Total\s*Rate\/?\s*C\.?\s*C\.?[^\d]{0,60}(\d+(?:\.\d+)?)/i,
+    /(?:do\s+not\s+(?:apply\s+)?(?:more\s+than|exceed)|maximum)[^.;]{0,60}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\s*\/?\s*A?)[^.;]{0,50}?per\s*crop\s*(?:cycle|season)/i
   ],
   maxTotalYr: [
-    /A\.?\s*I\.?\s*Max\s*Total\s*Rate\/?\s*(?:Yr\.?|Y\.?r\.?|Year|calendar\s*year)[^\d\n]{0,40}(\d+(?:\.\d+)?)/i,
-    /(?:do\s+not\s+(?:apply\s+)?(?:more\s+than|exceed)|maximum)[^.;\n]{0,40}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\s*\/?\s*A?)[^.;\n]{0,30}?per\s*(?:calendar\s*)?year/i
+    /A\.?\s*I\.?\s*Max\s*Total\s*Rate\/?\s*(?:Yr\.?|Y\.?r\.?|Year|calendar\s*year)[^\d]{0,60}(\d+(?:\.\d+)?)/i,
+    /(?:do\s+not\s+(?:apply\s+)?(?:more\s+than|exceed)|maximum)[^.;]{0,60}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\s*\/?\s*A?)[^.;]{0,60}?per\s*(?:calendar\s*)?year/i,
+    /Total.*?Rate.*?per.*?year[^.;]{0,60}?(\d+(?:\.\d+)?\s*lb\.?\s*a\.?i\.?\s*\/?\s*A?)/i
   ],
   mri: [
     /(?:minimum\s+retreatment\s+interval|MRI)[^.;\n]{0,25}?(\d+\s*(?:days?)?)/i,
@@ -952,42 +950,46 @@ const FIELD_PATTERNS = {
   // the block it appears in and must never be copied onto every row; only a
   // genuinely product-wide statement may be used as a fallback.
   geographic: [
-    /(Only\s+[Ff]or\s+[Uu]se\s+in:?\s*[A-Z][^.;\n]{0,80})/,
-    /(DO\s+NOT\s+use\s+in\s+(?:the\s+)?(?:states?\s+of\s+)?[A-Z][^.;\n]{0,80})/
+    /(Only\s+[Ff]or\s+[Uu]se\s+in:?\s*[A-Z][^.;]{0,150})/,
+    /(DO\s+NOT\s+use\s+in\s+(?:the\s+)?(?:states?\s+of\s+)?[A-Z][^.;]{0,150})/
   ],
   // The one geographic statement that really does apply to the whole product.
   geographicProduct: [
-    /(NY\s+restriction[^.;\n]{0,220})/i,
-    /(No\s+aerial\s+application\s+in\s+New\s+York\s+State[^.;\n]{0,20})/i,
-    /(Not\s+for\s+sale,?\s*(?:distribution\s*)?or\s+use\s+in\s+Nassau\s+and\s+Suffolk\s+Count(?:y|ies)[^.;\n]{0,90})/i
+    /(NY\s+restriction[^.;]{0,350})/i,
+    /(No\s+aerial\s+application\s+in\s+New\s+York\s+State[^.;]{0,50})/i,
+    /(Not\s+for\s+sale,?\s*(?:distribution\s*)?or\s+use\s+in\s+Nassau\s+and\s+Suffolk\s+Count(?:y|ies)[^.;]{0,150})/i
   ],
   // Drift parameters: wind speed, buffer distances, release height, droplet size.
   // 'Buffers? (for|from|zone)' is generic — avoids matching 'buffer distance (for'
   // which is a different paragraph structure.
+  // Changed [^.;\n] to [^.;] to allow embedded newlines in multi-line drift blocks,
+  // and increased limits from 80-120 to 200-300 to capture complete statements.
   drift: [
-    /(Wind\s+speed\s+limit[^.;\n]{0,80})/i,
-    /(Buffers?\s+(?:for|from|zone)[^.;\n]{0,120})/i,
+    /(Wind\s+speed\s+limit[^.;]{0,200})/i,
+    /(Buffers?\s+(?:for|from|zone)[^.;]{0,300})/i,
     /(Max(?:imum)?\.?\s*Release\s+Height\s*\(?ft\)?\s*:?\s*\d+)/i,
     /(ASABE\s+Droplet\s+Size\s*:?\s*[A-Za-z]+(?:\s+or\s+[A-Za-z]+)?)/i,
-    /(Max(?:imum)?\.?\s*boom\s+height\s*:?\s*[^.;\n]{0,30})/i
+    /(Max(?:imum)?\.?\s*boom\s+height\s*:?\s*[^.;]{0,60})/i
   ],
   // Real soil restrictions only. A bare "incorporat…" matched the Worker
   // Protection Standard paragraph and produced nonsense.
+  // Changed [^.;\n] to [^.;] to allow embedded newlines in multi-line soil blocks,
+  // and increased limits to 160-300 to capture complete soil prep instructions.
   soil: [
-    /(Any\s+soil\s+except[^.;\n]{0,120})/i,
-    /(DO\s+NOT\s+use\s+on\s+soils?\s+[^.;\n]{0,120})/i,
-    /(Place\s+(?:this\s+product|[A-Z][A-Za-z0-9\s®™.]+?)\s+\d[^.;\n]{0,80}inch[^.;\n]{0,80})/i,
-    /(For\s+(?:soil\s+)?(?:injection|drench|incorporation)[^.;\n]{0,120})/i,
-    /(DO\s+NOT\s+apply\s+to\s+water-?saturated\s+soils?[^.;\n]{0,100})/i,
-    /(Place\s+(?:the\s+)?product\s+\d[^.;\n]{0,80}below\s+(?:the\s+)?seed\s+line[^.;\n]{0,40})/i,
-    /(For\s+injection:\s*Place[^.;\n]{0,120})/i,
-    /(soil\s+incorporat\w+[^.;\n]{0,100})/i
+    /(Any\s+soil\s+except[^.;]{0,200})/i,
+    /(DO\s+NOT\s+use\s+on\s+soils?\s+[^.;]{0,200})/i,
+    /(Place\s+(?:this\s+product|[A-Z][A-Za-z0-9\s®™.]+?)\s+\d[^.;]{0,160}inch[^.;]{0,160})/i,
+    /(For\s+(?:soil\s+)?(?:injection|drench|incorporation)[^.;]{0,200})/i,
+    /(DO\s+NOT\s+apply\s+to\s+water-?saturated\s+soils?[^.;]{0,150})/i,
+    /(Place\s+(?:the\s+)?product\s+\d[^.;]{0,160}below\s+(?:the\s+)?seed\s+line[^.;]{0,80})/i,
+    /(For\s+injection:\s*Place[^.;]{0,200})/i,
+    /(soil\s+incorporat\w+[^.;]{0,150})/i
   ],
   nonTarget: [
-    /(Highly\s+toxic\s+to\s+adult\s+Megachile[^.;\n]{0,260})/i,
-    /(Pollinators?:\s*[^.;\n]{0,250})/i,
-    /(DO\s+NOT\s+apply\s+(?:to\s+crop\s+foliage\s+)?(?:during\s+foraging|if\s+bees\s+are)[^.;\n]{0,200})/i,
-    /(recommended\s+that\s+foliar\s+insecticides\s+are\s+applied[^.;\n]{0,220})/i
+    /(Highly\s+toxic\s+to\s+adult\s+Megachile[^.;]{0,400})/i,
+    /(Pollinators?:\s*[^.;]{0,350})/i,
+    /(DO\s+NOT\s+apply\s+(?:to\s+crop\s+foliage\s+)?(?:during\s+foraging|if\s+bees\s+are)[^.;]{0,300})/i,
+    /(recommended\s+that\s+foliar\s+insecticides\s+are\s+applied[^.;]{0,320})/i
   ]
 };
 
