@@ -1680,7 +1680,7 @@ function findProductName(text) {
    available as anchors. Instead we locate the target keyword and walk
    backwards over the preceding tokens, collecting those that look like
    part of an ALL-CAPS heading. */
-const SECTION_TARGET_RE = /\b(FOLIAR|SOIL|PLANTHOUSE|IN-?FURROW|DRENCH|INJECTION|BANDED?)(?=\b|Crop\s+Group\b)/g;
+const SECTION_TARGET_RE = /\b(FOLIAR|SOIL|PLANTHOUSE|CHEMIGATION|IN-?FURROW|DRENCH|INJECTION|BANDED?)(?=\b|Crop\s+Group\b)/g;
 
 // Headings that look like sections but are not uses.
 const NOT_A_USE = /^(?:AND|OR|THE|FOR|SEE|NOTE|APPLY|APPLICATION|DIRECTIONS|SPECIFIC|CROP|USE|PEST|PRODUCT|RATE|TABLE|GROUP|INSECTICIDE|RESISTANCE|MANAGEMENT|STORAGE|DISPOSAL|PRECAUTIONARY|RESTRICTIONS?|INFORMATION|IRAC|EPA|SIVANTO|GENERAL|MIXING|SPRAY|CHEMIGATION|AERIAL|GROUND|INJECTION|DRENCH|BROADCAST)\b/;
@@ -2177,6 +2177,9 @@ function parseDocument(doc) {
     } else if (sec.target === "IN-FURROW") {
       row["App. Target"] = "Soil";
       row["App. Type"] = "In-Furrow";
+    } else if (sec.target === "CHEMIGATION") {
+      row["App. Target"] = "Soil";
+      row["App. Type"] = "Chemigation";
     } else if (sec.target === "INJECTION") {
       row["App. Target"] = "Soil";
       row["App. Type"] = "Injection";

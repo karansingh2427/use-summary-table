@@ -84,7 +84,9 @@ def _best_match(gt_row: dict, app_rows: list[dict]) -> dict | None:
 
     best_score, best_row = 0.0, None
     for r in app_rows:
-        if _norm_pbn(r.get("product name (pbn)", "")) != gt_pbn:
+        app_pbn = _norm_pbn(r.get("product name (pbn)", ""))
+        # Skip pbn check when GT has no product name (data quality gap in GT)
+        if gt_pbn and app_pbn != gt_pbn:
             continue
         app_target = _norm_target(r.get("app. target", ""))
         if app_target != gt_target:
@@ -111,8 +113,13 @@ _TARGET_MAP = {
     "foliar": "foliar", "soil": "soil", "seed treatment": "seed",
     "seed": "seed", "soil drench": "soil",
 }
+# Known target typos in the ground truth
+_TARGET_TYPOS = {"foiliar": "foliar", "folair": "foliar", "soill": "soil"}
+
 def _norm_target(v: str) -> str:
     n = _norm_val(v)
+    # Correct known typos before looking up the canonical form
+    n = _TARGET_TYPOS.get(n, n)
     return _TARGET_MAP.get(n, n.split()[0] if n else "")
 
 def _word_set(v: str) -> set:
@@ -126,13 +133,22 @@ def _word_set(v: str) -> set:
     return words
 
 def _jaccard(a: str, b: str) -> float:
-    """Word-level Jaccard similarity — robust to minor wording differences."""
+    """Word-level Jaccard similarity with asymmetric containment bonus.
+
+    When one crop name is a short subset of the other (e.g. GT 'Canola' vs
+    APP 'Canola (including Brassica napus...)'), containment-based similarity
+    prevents a 0-score match due to the large difference in name length.
+    """
     sa, sb = _word_set(a), _word_set(b)
     if not sa and not sb:
         return 1.0
     if not sa or not sb:
         return 0.0
-    return len(sa & sb) / len(sa | sb)
+    intersection = len(sa & sb)
+    # Containment: how much of the smaller set is covered by the larger?
+    containment = intersection / min(len(sa), len(sb))
+    jaccard = intersection / len(sa | sb)
+    return max(jaccard, containment * 0.5)  # containment contributes at half weight
 
 # Long-text columns where minor wording differences are expected; scored with
 # word-level Jaccard similarity instead of exact match (threshold = 0.5).
