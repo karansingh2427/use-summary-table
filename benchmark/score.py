@@ -129,10 +129,24 @@ def _jaccard(a: str, b: str) -> float:
         return 0.0
     return len(sa & sb) / len(sa | sb)
 
+# Long-text columns where minor wording differences are expected; scored with
+# word-level Jaccard similarity instead of exact match (threshold = 0.5).
+_JACCARD_COLS = {
+    _norm_col("Geographic Restrictions"),
+    _norm_col("Drift Restrictions"),
+    _norm_col("Soil Restrictions"),
+    _norm_col("On-field Non-target Species Restrictions"),
+    _norm_col("Additional Restrictions for Use/Use Site"),
+    _norm_col("Additional Information"),
+    _norm_col("App. Equipment"),
+}
+
 # ---------------------------------------------------------------------------
-# Field comparison — exact after normalisation
+# Field comparison — exact after normalisation, Jaccard for long-text columns
 # ---------------------------------------------------------------------------
-def _fields_match(gt_val: str, app_val: str) -> bool:
+def _fields_match(gt_val: str, app_val: str, col: str = "") -> bool:
+    if col in _JACCARD_COLS:
+        return _jaccard(gt_val, app_val) >= 0.5
     return _norm_val(gt_val) == _norm_val(app_val)
 
 # ---------------------------------------------------------------------------
@@ -202,7 +216,7 @@ def score(app_csv: str, gt_csv: str) -> None:
             app_val = app_row.get(app_col, "")
             if gt_val in ("", "NS", "NA") and app_val in ("", "NS", "NA"):
                 continue  # both empty/NS/NA — skip to avoid inflating scores
-            labels[label]["field_hits"]  += int(_fields_match(gt_val, app_val))
+            labels[label]["field_hits"]  += int(_fields_match(gt_val, app_val, gt_col))
             labels[label]["field_total"] += 1
 
     # ---------------------------------------------------------------------------
