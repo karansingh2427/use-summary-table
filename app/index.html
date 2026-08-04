@@ -1273,6 +1273,10 @@ function finaliseSeedTreatmentRow(row, block, docText) {
     row["App. Timing (Site Status)"] = "Pre-emergence";
     (row.__derived = row.__derived || {})["App. Timing (Site Status)"] = "D3.11";
   }
+  if (row["App. Timing (other)"] === NOT_SPECIFIED) {
+    row["App. Timing (other)"] = "Treatment of seed";
+    (row.__derived = row.__derived || {})["App. Timing (other)"] = "D3.12";
+  }
   // Table fallback for App Rate and A.I. Max Single Rate/App. (lb a.i./A).
   if (row["App Rate (lb ai/A)"] === NOT_SPECIFIED || row["A.I. Max Single Rate/App. (lb a.i./A)"] === NOT_SPECIFIED) {
     const table = block.match(/Pest\s+Controlled[\s\S]{0,1400}?g\s*a\.?i\.?\/A\s*\*?\s*\(lb\/?A\)([\s\S]{0,700}?)(?:Pest\s+Suppressed|Application\s+Restrictions|Seed\s+Tag\s+Labeling)/i)
@@ -2623,8 +2627,9 @@ function jumpToQcDefect(code) {
   if (reviewFlow && reviewFlow.paused) reviewFlow.paused = false;
   clearReviewFlow();
   showResults();
-  searchEl.value = String(matchedRows[0]["Use"] || "");
-  renderTable(searchEl.value);
+  // Show all defect rows: clear the search so rows with different Use names aren't hidden
+  searchEl.value = "";
+  renderTable("");
   const header = [...groupsEl.querySelectorAll("th")].find(th => th.textContent.includes(target.column));
   if (header) header.scrollIntoView({ block: "nearest", inline: "center" });
   openRowById(matchedRows[0].__id);
