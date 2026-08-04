@@ -861,7 +861,9 @@ const FIELD_PATTERNS = {
   // establishment numbers and phone numbers earlier in the label.
   regNo: [
     /EPA\s+Reg(?:istration)?\.?\s*(?:No|Number)\.?\s*:?\s*(\d{2,6}\s*[-–]\s*\d{1,6})/i,
-    /EPA\s+Reg(?:istration)?\.?\s*(?:No|Number)\.?\s*:?\s*(\d{2,6}\s*[-–]\s*[A-Z0-9]{2,8})/i
+    /EPA\s+Reg(?:istration)?\.?\s*(?:No|Number)\.?\s*:?\s*(\d{2,6}\s*[-–]\s*[A-Z0-9]{2,8})/i,
+    // File Symbol labels (SLN / state registrations) use this identifier instead of Reg. No.
+    /(?:File\s+(?:Symbol|Sym|No)|EPA\s+File\s+Sym)\.?\s*:?\s*(\d{2,6}\s*[-–]\s*[A-Z]{2,6})/i
   ],
   physicalForm: [
     /\b\d{2,4}\s*(WP|SC|WG|WDG|EC|SL|SE|ME|CS|DF|FL|FS|GR)\b/i,
@@ -901,7 +903,9 @@ const FIELD_PATTERNS = {
     /\b((?:Air-?blast|Airblast)\s+sprayers?[^.;]{0,100}|Ground\s+(?:Equipment|sprayers?|boom)[^.;]{0,100}|fixed\s+or\s+rotary\s+winged\s+aircraft[^.;]{0,60}|boomless\s+ground\s+equipment|handheld\s+equipment)\b/i
   ],
   appTimingStatus: [
-    /\b(Pre-?emergence\s*\/\s*Post-?emergence|Pre-?plant\s+surface|Post-?plant\s+pre-?emergence|Pre-?emergen(?:ce|t)|Post-?emergen(?:ce|t)|Post-?petal\s+fall|Pre-?transplant|At-?planting|Pre-?plant)\b/i
+    // Combined forms tried first so they win over single-word alternatives earlier in the block.
+    /\b(Pre-?emergence\s*\/\s*Post-?emergence|Post-?plant\s+pre-?emergence|Pre-?plant\s+surface|Post-?petal\s+fall)\b/i,
+    /\b(Pre-?emergen(?:ce|t)|Post-?emergen(?:ce|t)|Pre-?Emergent|Post-?transplant|Pre-?transplant|At-?planting|Pre-?plant)\b/i
   ],
   appTimingOther: [
     // "When pests occur" is the authoritative phrasing for this column
