@@ -132,13 +132,41 @@ def _word_set(v: str) -> set:
             words.add(w.rstrip("s") if len(w) > 4 else w)  # stem plurals
     return words
 
-def _jaccard(a: str, b: str) -> float:
+def _normalize_restrictions_text(v: str) -> str:
+    """Normalize restriction-field text by:
+    - Removing unit notations and parenthetical info (mph, ft, etc.)
+    - Collapsing multiple spaces
+    - Removing common formatting punctuation
+    """
+    s = _norm_val(v)
+    # Remove units in parentheses: "(mph)", "(ft)", etc.
+    s = re.sub(r'\s*\([^)]*(?:mph|ft|hrs?|hours?|days?|plants?|acres?)[^)]*\)', '', s, flags=re.I)
+    # Remove trailing colons or semicolons
+    s = re.sub(r'[:;]\s*$', '', s)
+    # Collapse "15  mph" to "15 mph" and remove " - " to get "15 mph"
+    s = re.sub(r'\d+\s*[-–]\s*\d+', lambda m: m.group().replace(' ', '').replace('-', ' ').replace('–', ' '), s)
+    # Remove ":?" after field names like "Wind speed limit:" -> "Wind speed limit"
+    s = re.sub(r'\b(Wind\s+speed|Buffer|Release\s+Height|Droplet\s+Size|NYC|NY|New York)\s*:?\s*', r'\1 ', s)
+    # Normalize "3 - 4 inches" to "3 4 inches" for better matching
+    s = re.sub(r'(\d+)\s*[-–]\s*(\d+)', r'\1 \2', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+def _jaccard(a: str, b: str, field: str = "") -> float:
     """Word-level Jaccard similarity with asymmetric containment bonus.
 
     When one crop name is a short subset of the other (e.g. GT 'Canola' vs
     APP 'Canola (including Brassica napus...)'), containment-based similarity
     prevents a 0-score match due to the large difference in name length.
+    
+    For restriction fields, apply extra text normalization before scoring.
     """
+    # Pre-process restriction fields to normalize formatting differences
+    if field in {"geographic restrictions", "drift restrictions", "soil restrictions",
+                  "app. equipment", "additional restrictions for use/use site"}:
+        a = _normalize_restrictions_text(a)
+        b = _normalize_restrictions_text(b)
+    
     sa, sb = _word_set(a), _word_set(b)
     if not sa and not sb:
         return 1.0
@@ -203,7 +231,13 @@ def _fields_match(gt_val: str, app_val: str, col: str = "") -> bool:
     if col in _NUMERIC_RATE_COLS:
         return _numeric_close(gt_val, app_val)
     if col in _JACCARD_COLS:
-        return _jaccard(gt_val, app_val) >= 0.5
+        # Pass field name to Jaccard for field-specific normalization
+        jaccard_sim = _jaccard(gt_val, app_val, col)
+        # Restriction fields get slightly lower threshold (0.45 instead of 0.5)
+        # to account for formatting variations in buffer distances, etc.
+        threshold = 0.45 if col in {"geographic restrictions", "drift restrictions",
+                                     "soil restrictions", "app. equipment"} else 0.5
+        return jaccard_sim >= threshold
     return _norm_val(gt_val) == _norm_val(app_val)
 
 # ---------------------------------------------------------------------------
