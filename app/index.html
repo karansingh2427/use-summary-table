@@ -824,14 +824,16 @@ const CROP_TERMS = [
   "Bentgrass","Bermudagrass","Bluegrass","Christmas Tree","Conifer","Fescue","Flowers","Grass",
   "Ground Cover","Nursery Stock","Ornamentals","Ryegrass","Shade Tree","Shrubs","Sod","Turf",
   "Turfgrass","Zoysiagrass",
-  // --- EPA crop groups & subgroups (40 CFR 180.41) ---
+  // --- Small grains / cereals ---
+  "Cereal","Cereals",
   "Berry Group","Brassica","Bulb Vegetable","Cereal Grains","Citrus Fruit","Cole Crops",
   "Cucurbit Vegetables","Edible Podded Legumes","Fruiting Vegetables","Herbs and Spices",
   "Leafy Greens","Leafy Vegetables","Legume Vegetables","Non-Grass Animal Feeds","Oilseed Group",
   "Pome Fruit","Root and Tuber Vegetables","Root Vegetables","Small Fruit","Small Grains",
   "Stalk and Stem Vegetables","Stone Fruit","Tree Nut","Tropical Fruit","Tuberous Vegetables",
   "Vine Crops",
-  // --- Group names as labels actually write them ---
+  // --- Tree/vine crops as they appear in label headings ---
+  "Fruit Tree","Tree Nut","Fruit Tree and Tree Nut","Fruit Tree, Tree Nut and Other Crop",
   "Brassica (Cole) Leafy Vegetables","Bushberry","Caneberry","Low Growing Berry",
   "Small Fruit Vine Climbing","Tuberous and Corm Vegetables","Tropical and Subtropical Fruit",
   "Cottonseed","Taro Leaves","Taro","Kava","Hop","Quinoa","Christmas Trees",
@@ -2055,7 +2057,7 @@ function findUseSections(text) {
   // R29: Labels with 'SPECIFIC CROP DIRECTIONS' organise uses as crop-name headings.
   // Prioritise table-row detection for these so product-level target-heading matches
   // don't consume the entire document as a single section.
-  if (/SPECIFIC\s+CROP\s+DIRECTIONS/i.test(text)) {
+  if (/SPECIFIC\s+CROP\s+DIRECTIONS|SPECIFIC\s+USE\s+DIRECTIONS/i.test(text)) {
     const tableSections = findTableRowSections(text);
     if (tableSections.length > 0) {
       return tableSections.map((s, i) => {
@@ -2098,8 +2100,19 @@ function findUseSections(text) {
     found.push(...findGenericAllCapsSections(text));
   }
 
-  // R29: If still no sections, try table-row detection for labels that list
-  // crops as rows in an embedded use table rather than as narrative headings.
+  // R29: If found sections are all product-name-like (e.g. "USH679SC200 Herbicide"),
+  // the target-heading detector picked up a false positive. Switch to table-row
+  // detection which finds real crop headings (SOYBEAN, FIELD CORN, etc.).
+  const PRODUCT_NAME_RE = /\b(?:Herbicide|Fungicide|Insecticide|Nematicide|Miticide|Bactericide)\b/i;
+  if (found.length > 0 && found.every(s => PRODUCT_NAME_RE.test(s.useName))) {
+    const tableSections = findTableRowSections(text);
+    if (tableSections.length > 0) {
+      found.length = 0;
+      found.push(...tableSections);
+    }
+  }
+
+  // R29: If still no sections, try table-row detection.
   if (!found.length) {
     found.push(...findTableRowSections(text));
   }
