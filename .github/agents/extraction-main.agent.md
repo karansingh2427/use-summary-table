@@ -1,7 +1,7 @@
 ---
 name: extraction-main-agent
 description: Main extraction agent for the use summary workflow. Use this agent to run the extraction flow first and prepare QC-ready outputs and run notes.
-model: ["Claude Sonnet 4.5 (copilot)", "Claude Opus (copilot)"]
+model: ["Claude Sonnet 4.5 (copilot)", "Claude Opus (copilot)", "GPT-4 (copilot)"]
 user-invocable: false
 ---
 

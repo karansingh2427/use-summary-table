@@ -1,7 +1,7 @@
 ---
 name: docs-agent
 description: Documentation specialist for creating and maintaining project documentation. Use this agent to write READMEs, user guides, and technical docs.
-model: ["Claude Sonnet 4.5 (copilot)", "Claude Opus (copilot)"]
+model: ["Claude Sonnet 4.5 (copilot)", "Claude Opus (copilot)", "GPT-4o (copilot)"]
 tools: ['search', 'fetch', 'editFiles']
 ---
 

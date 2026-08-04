@@ -23,22 +23,122 @@ The app runs by opening `app/index.html` directly in a browser. No build step, n
 **`knowledge/` is reference material only.** It is never loaded by the app at runtime, and
 nothing in it supplies facts about a product — only the source label PDF does that.
 
-## 2 · Model Selection for Agent Tasks
+## 2 · Adaptive Model Selection
 
-When invoking Copilot agents for extraction, QC, and testing work, **model selection is
-automatic** based on task type:
+The project uses **intelligent model selection** that adapts based on task complexity and model
+capabilities. Models are selected dynamically to match task requirements.
 
-| Task | Primary Model | Fallback | Why |
-|------|---|---|---|
-| **PDF Extraction** (`extraction-main-agent`) | Claude Sonnet 4.5 | Claude Opus | Best at regulatory text parsing, complex workflows, structured output |
-| **Quality Control** (`QC-agent`) | Claude Sonnet 4.5 | Claude Opus | Excels at accuracy verification and multi-field validation |
-| **Orchestration** (`orchestrator-agent`) | Claude Sonnet 4.5 | Claude Opus | Handles two-stage workflows with state coordination |
-| **Code Review** (`review-agent`) | Claude Sonnet 4.5 | GPT-4 | Strong pattern recognition and technical feedback |
-| **Testing** (`test-agent`) | Claude Sonnet 4.5 | Claude Opus | Logical test design and edge-case reasoning |
-| **Documentation** (`docs-agent`) | Claude Sonnet 4.5 | Claude Opus | Clear technical writing and structure |
+### Model Capability Matrix
 
-Each agent automatically selects its configured model. You don't need to specify a model;
-it happens transparently based on the agent you invoke.
+| Model | Regulatory Text | Pattern Recognition | Multi-Step Reasoning | Code Review | Speed | Cost |
+|-------|---|---|---|---|---|---|
+| **Claude Sonnet 4.5** | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ | Fast | Standard |
+| **Claude Opus** | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | Slower | Higher |
+| **GPT-4** | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | Fast | Higher |
+| **GPT-4o** | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | Faster | Standard |
+
+### Task Complexity Assessment
+
+When selecting a model, evaluate **task complexity** using these factors:
+
+| Factor | Low | Medium | High |
+|--------|-----|--------|------|
+| **Text Volume** | <10 pages | 10–50 pages | >50 pages |
+| **Field Count** | <10 | 10–25 | >25 |
+| **Ambiguity** | Clear wording | Some synonyms/variants | Heavy ambiguity/contradictions |
+| **Reasoning Steps** | 1–2 | 3–5 | >5 |
+| **Regulatory Complexity** | Standard rates | Tiered/conditional rates | Multiple conditions, edge cases |
+
+**Task Complexity Score** = (sum of complexity levels) ÷ (number of factors)
+
+- **Low** (score 1–1.5) → Use speed-optimized model (Sonnet 4.5, GPT-4o)
+- **Medium** (score 1.5–2.5) → Use balanced model (Sonnet 4.5, GPT-4)
+- **High** (score 2.5–3) → Use capability-optimized model (Opus, GPT-4)
+
+### Model Selection by Agent
+
+Each agent uses **ranked preference chains** that adapt to complexity:
+
+#### **extraction-main-agent** (PDF Parsing & Field Extraction)
+- **Low complexity**: Claude Sonnet 4.5 (fast, accurate for standard labels)
+- **Medium complexity**: Claude Sonnet 4.5 → Claude Opus (escalate if pattern matching fails)
+- **High complexity**: Claude Opus → Claude Sonnet 4.5 (prefer depth, fallback for speed)
+
+**Why**: Regulatory text parsing + structured extraction needs pattern recognition.
+Sonnet 4.5 handles most labels; Opus for edge cases (contradictions, rare formats).
+
+#### **QC-agent** (Accuracy Verification)
+- **Low complexity**: Claude Sonnet 4.5 (spot-check mode)
+- **Medium complexity**: Claude Sonnet 4.5 → Claude Opus (escalate for detailed validation)
+- **High complexity**: Claude Opus (full audit with cross-field verification)
+
+**Why**: QC requires consistency checking across 27 fields. Opus better at multi-field reasoning.
+
+#### **review-agent** (Code Review)
+- **Low complexity**: GPT-4o (syntax, style)
+- **Medium complexity**: Claude Sonnet 4.5 → GPT-4 (pattern detection, logic review)
+- **High complexity**: GPT-4 → Claude Opus (architectural review, security reasoning)
+
+**Why**: Code review needs strong pattern recognition. GPT-4 excels; Opus for edge cases.
+
+#### **test-agent** (Test Design & QA)
+- **Low complexity**: Claude Sonnet 4.5 (standard test cases)
+- **Medium complexity**: Claude Sonnet 4.5 → Claude Opus (edge case generation)
+- **High complexity**: Claude Opus (exhaustive scenario planning)
+
+**Why**: Test design benefits from depth reasoning for edge cases and boundary conditions.
+
+#### **orchestrator-agent** (Workflow Coordination)
+- All complexity: Claude Sonnet 4.5 → Claude Opus (orchestration rarely needs Opus, but available)
+
+**Why**: Orchestration is routing, not reasoning-heavy. Sonnet 4.5 sufficient.
+
+#### **docs-agent** (Documentation)
+- **Low complexity**: Claude Sonnet 4.5 (user guides, standard docs)
+- **High complexity**: Claude Sonnet 4.5 → Claude Opus (complex technical explanations)
+
+**Why**: Docs rarely need reasoning depth; Sonnet 4.5 covers most needs.
+
+### Adding New Models
+
+To add a new model (e.g., Claude 5, Grok, Gemini) to the selection system, see [ADD-NEW-MODELS.md](./ADD-NEW-MODELS.md)
+for the complete step-by-step process.
+
+Quick summary:
+1. Benchmark the new model on your extraction/QC tasks
+2. Update the Capability Matrix (above) with its strengths
+3. Rank it in each agent's `model:` array based on performance
+4. Update decision trees to position it in the complexity-based chains
+5. Test with a sample task, then commit
+
+The system is designed to be **flexible and extensible** — adding a new model is as simple as
+updating configuration files and testing.
+
+### Escalation Triggers
+
+An agent automatically escalates to the next model if:
+- Current model signals uncertainty or ambiguity in the task
+- Pattern extraction returns <70% field fill rate
+- Task requires multi-field cross-validation (QC agent)
+- Contradictions are detected in source text
+
+### Using the Model Selector (Optional)
+
+If you're unsure which agent or model to use for a task, run the **model selector**:
+
+```
+@model-selector
+I have 3 pesticide labels (30 pages total) with complex tiered rates and
+geographic restrictions. The extraction has been hit-or-miss. Should I
+use a particular model for QC?
+```
+
+The model selector will:
+1. Assess your task complexity (using the 5-factor rubric above)
+2. Recommend specific models ranked by suitability
+3. Explain the reasoning
+
+Then invoke the recommended agent. The agent will use the recommended model(s) automatically.
 
 ## 3 · How to Make Changes
 
