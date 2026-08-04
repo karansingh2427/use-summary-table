@@ -89,6 +89,11 @@ For each column, scan the whole column before moving on:
 - [ ] **Page** — within the PDF's actual page count
 - [ ] **Restriction columns** — content in the right column: geography vs drift vs soil vs
       non-target species vs additional
+- [ ] **Restriction scope (R-14)** — product-wide restrictions (stated once, generally, not
+      tied to one crop) appear on every row, not `NS`; method-scoped restrictions (drift,
+      droplet size, pollinator timing) are `NA` on rows whose application method they can't
+      reach (soil/chemigation/drench); crop-scoped restrictions don't leak onto unrelated rows
+      (the D11 defect — worse than a blank cell, because it reads as verified)
 
 ### Pass 3 — Row-wise verification
 - [ ] Sample rows for verification: **all Low-confidence rows**, plus a spread of Medium

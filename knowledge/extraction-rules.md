@@ -193,6 +193,37 @@ machine reading. Keep everything in this folder as `.txt` or `.md`.
 
 ---
 
+## R-14 · A restriction's scope decides which *rows* get it, not just which column
+
+R-7 says which column a restriction goes in. This rule says which rows.
+
+Labels state restrictions at three different scopes, and each is handled differently:
+
+| Scope | Where it's stated | How to fill it |
+|---|---|---|
+| **Product-wide** | Once, in a general Precautions/Restrictions/Agricultural Use Requirements section that isn't tied to any one crop | Copy onto **every** row's matching column. Leaving it `NS` on rows the label never repeats it for is the mistake — the label said it once for the whole product, not once per row. |
+| **Method-scoped** | Stated for a physical application process (spray drift buffers, droplet size, release height, pollinator-foraging timing) | Copy onto every row that uses a matching method (foliar/aerial spray); `NA` on rows using a method the restriction can't apply to (soil injection, chemigation, drench) — the label did address the topic, it just doesn't reach that method. |
+| **Crop/section-scoped** | Stated inside one crop's own block (`Only For Use in: Idaho, Oregon and Washington` under Clover; `Not for use in Greenhouses` under a Planthouse row) | Copy **only** onto rows built from that section. |
+
+**SIVANTO 400 SL confirms this pattern directly** (`knowledge/golden-examples/golden_example_SIVANTO_400_SL.txt`):
+the NY aerial/Nassau-Suffolk sale ban is product-wide and appears on all 44 rows; `Max Release
+Height (ft): 10, ASABE Droplet Size: Coarse` and the pollinator-foraging note are method-scoped —
+present on every Foliar row, `Not Applicable` on every Soil/Chemigation row; `Only For Use in:
+Idaho, Oregon, and Washington` is crop-scoped to Clover alone.
+
+**Mistake logged (D11, Critical):** the app's document-wide fallback once stamped the Clover-only
+and Planthouse-only restrictions onto all 41 rows. **Copying a crop-specific restriction onto
+unrelated rows is fabrication — worse than an empty cell, because it reads as verified.** Getting
+the scope wrong in the other direction (leaving a genuinely product-wide restriction as `NS`
+because no single crop section restates it) is just as wrong, only quieter.
+
+**Rule:** before writing `NS` in Geographic / Drift / Soil / On-field Non-target / Additional
+for Use, first locate where the label states that restriction. If it's in a general section that
+applies to the whole product, propagate it to every row (gated by method-applicability, per the
+table above) — do not wait for a crop-specific block to repeat it.
+
+---
+
 ## Pre-flight checklist
 
 Before releasing a table:
@@ -204,6 +235,7 @@ Before releasing a table:
 - [ ] Conditional rates and PHIs kept whole (**R-4**, **R-12**)
 - [ ] Crop-group exceptions preserved (**R-11**)
 - [ ] Restrictions routed to the right column (**R-7**)
+- [ ] Restriction scope determined — product-wide restrictions propagated to every row, method-scoped restrictions gated `NA` on non-matching methods, crop-scoped restrictions confined to their own rows (**R-14**)
 - [ ] PPE, MRI, REI, App Rate all populated (**R-8**)
 - [ ] C.C. and Yr columns distinguished; cross-check applied (**R-9**)
 - [ ] AI-level annual caps captured (**R-10**)

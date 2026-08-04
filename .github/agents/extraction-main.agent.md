@@ -94,6 +94,14 @@ page:
     inferred, never averaged, never borrowed from another row/label/golden example.
   - R-7: route restriction text to its own column (geographic / drift / soil / non-target
     species / additional) — do not let it default into "Additional Information."
+  - R-14: a restriction's scope decides which *rows* get it. Product-wide restrictions
+    (general Precautions/Restrictions/Agricultural Use Requirements sections not tied to any
+    one crop) go on every row — do not leave them `NS` just because no crop section repeats
+    them. Method-scoped restrictions (spray drift buffers, droplet size, pollinator-foraging
+    timing) go on every row using a matching method, `NA` on rows whose method they can't
+    reach (soil injection, chemigation, drench). Crop-scoped restrictions stay confined to
+    rows built from that crop's own section — copying one onto unrelated rows is fabrication,
+    worse than an empty cell (R-5, D11).
   - R-9/R-10: keep Max # Apps/C.C. distinct from Max # Apps/Yr.; capture AI-level annual caps
     in Additional Information even when they override the per-product math.
   - R-11: preserve the crop's group code and any exception (`TREE NUTS (Crop Group 14-12) -
@@ -125,7 +133,9 @@ locked:
 - `Max No. of CC/yr` follows Rule 5.1 (calendar-year cap → 1; crop-season cap with
   stated seasons/yr → that value; otherwise → NS).
 - Every restriction is in the correct restriction column (geographic vs drift vs soil vs
-  non-target vs additional).
+  non-target vs additional), and at the correct scope (R-14): product-wide restrictions appear
+  on every row, method-scoped ones are `NA` where the method doesn't apply, crop-scoped ones
+  never leak onto other crops' rows.
 - No cell is blank — empty values are `NS` or `NA`, never blank.
 - Spot-check: does every quoted phrase actually appear in *this* label at the page cited, not
   carried over from a golden example or another label (R-5)?
@@ -156,6 +166,9 @@ Before generating the handoff package, confirm:
 - [ ] `Max No. of CC/yr` Rule 5.1 applied consistently
 - [ ] PHI/REI units correct throughout
 - [ ] No blank cells — all empty values are `NS` or `NA`
+- [ ] Restriction scope applied correctly (R-14): product-wide restrictions propagated to every
+      row, method-scoped restrictions `NA` on non-matching methods, crop-scoped restrictions not
+      leaked onto unrelated rows
 
 Optionally, you may run `app/index.html` against the same PDF(s) purely as a second-opinion
 completeness check: if its coverage warnings surface a crop or section your inventory missed,
@@ -205,7 +218,7 @@ Return exactly these sections:
 - Row counts per label and combined
 
 5. Self-Verification Checklist Result
-- Pass or Fail for each of the seven checklist items in Step 6
+- Pass or Fail for each of the eight checklist items in Step 6
 - Any item that did not pass: describe the gap
 
 6. Warnings
