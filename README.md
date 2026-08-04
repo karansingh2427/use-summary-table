@@ -30,8 +30,8 @@ No build step and no server required:
 open app/index.html
 ```
 
-Or double-click `app/index.html` in Finder. PDF.js and SheetJS load from a CDN, so an internet
-connection is needed on first load.
+Or double-click `app/index.html` in Finder. PDF.js and SheetJS are bundled locally in
+`app/vendor/`, so the app runs fully offline — no internet connection required.
 
 ## Architecture
 
@@ -56,14 +56,31 @@ graph LR
 ```
 
 **Key Components:**
-1. **PDF.js (CDN)**: Extracts text layer from PDFs; reports pages with no text for OCR
+1. **PDF.js (bundled)**: Extracts text layer from PDFs; reports pages with no text for OCR
 2. **Regex Patterns**: 60+ field-specific patterns recognize rates, timings, restrictions, equipment
 3. **Derivation Rules**: Computes derived fields (e.g., `Max # Apps/Yr = Total Rate/Yr ÷ Single Rate`)
 4. **Confidence Scoring**: Scores each row High/Medium/Low based on field fill percentage
 5. **Human Review UI**: Inline editing, page references, source text expansion, live search
-6. **SheetJS (CDN)**: Generates Excel files; includes audit columns (Page, Source, Confidence)
+6. **SheetJS (bundled)**: Generates Excel files; includes audit columns (Page, Source, Confidence)
 
 **No external APIs, no backend server, no authentication — everything runs in the browser.**
+
+### Two extraction paths, not one
+
+This repo actually holds two independent ways to extract a table, and they don't share logic:
+
+1. **The browser app above** — a static regex/heuristic engine. Fast, offline, deterministic,
+   but it never reads `knowledge/` at runtime (see `knowledge/README.md`), so it can't apply
+   prose rules like "quote the label verbatim" or "route drift text to its own restriction
+   column." Lessons from `knowledge/training-logs/` only reach it when someone manually ports
+   them into a regex pattern.
+2. **The Copilot agent workflow** — `orchestrator-agent` → `extraction-main-agent` →
+   `QC-agent`, run via GitHub Copilot Chat (see `.github/agents/`). `extraction-main-agent`
+   reads each label PDF itself and builds the table through its own reasoning against
+   `knowledge/extraction-rules.md` and `knowledge/derivation-rules.md` — this is the path that
+   mirrors a human analyst's judgment (and the manual Gemini/Copilot-chat extraction sessions
+   this project started from). Use it when the regex app's precision on a field (see the table
+   below) isn't good enough for the label in front of you.
 
 ## Results
 
@@ -185,7 +202,8 @@ Both need the sample label PDFs described in `samples/README.md`.
 **Rationale**:
 - **No backend required** — stays in-browser, no server deployment
 - **No API costs or latency** — extraction is instant
-- **No external dependencies** — offline-capable (after first load)
+- **No external dependencies** — PDF.js and SheetJS are bundled locally, so the app is fully
+  offline-capable
 - **Deterministic output** — regex patterns produce consistent results
 - **Regulatory compliance** — no data leaves the user's computer
 - **Extensible** — new patterns added without retraining
@@ -207,7 +225,7 @@ Both need the sample label PDFs described in `samples/README.md`.
 - **Team collaboration** — changes are visible in Git as diffs
 - **Browser compatibility** — runs in any modern browser
 
-**Trade-off**: Code is ~2950 lines in one file. Mitigated by:
+**Trade-off**: Code is ~3700 lines in one file. Mitigated by:
 - Clear section comments tying code to requirements
 - SCHEMA as single source of truth for columns
 - Consistent pattern naming (e.g., `FIELD_PATTERNS.driftRestrictions`)
@@ -277,8 +295,8 @@ Both need the sample label PDFs described in `samples/README.md`.
   image-only PDFs will not extract text. See `app/vendor/README.md`.
 - **Browser storage**: Saved runs use browser local storage (typically ~10 MB limit). 
   Large extraction batches should be exported regularly.
-- **No offline mode**: PDF.js and SheetJS load from CDN; first-time use requires internet.
-  Subsequent runs work offline (libraries cached).
+- **Fully offline**: PDF.js and SheetJS are bundled locally in `app/vendor/` — no CDN, no
+  internet connection required at any point.
 
 ### Adaptive Model Selection
 - **Available models**: System defaults to Claude Sonnet 4.5 for agent-based extraction tasks; 

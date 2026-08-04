@@ -2,9 +2,7 @@
 
 `02-multi-crop-long.csv` has been removed. It described the old 11-column schema
 (`Crop`, `Use / Pest`, `Application Rate`, `Units`, …) with `Not specified` fill values, and
-referenced a PDF that was never added to `samples/`.
-
-Both are obsolete:
+referenced a PDF that was never added to `samples/`. That schema is obsolete:
 
 - The schema is now the 27-column UST definition — see `knowledge/schema-reference.md`.
 - Fill values are `NS` and `NA`, not `Not specified`.
