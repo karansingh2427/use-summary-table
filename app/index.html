@@ -933,12 +933,15 @@ const FIELD_PATTERNS = {
     /(\d+)\s*applications?\s*per\s*crop\s*(?:cycle|season)/i,
     /maximum[^.;]{0,30}?(\d+)\s*applications?[^.;]{0,20}?per\s*crop/i,
     /(?:make\s+)?no\s+more\s+than\s+(\d+)\s*applications?\s*per\s*crop/i,
-    /(?:do\s+not\s+(?:make|apply)\s+more\s+than)\s*(\d+)\s*applications?/i
+    /(?:do\s+not\s+(?:make|apply)\s+more\s+than)\s*(\d+)\s*applications?/i,
+    /Maximum\s+of\s+(\d+)\s*applications?\s+per\s+crop\s+season/i
   ],
   maxAppsYr: [
     /Maximum\s+number\s+of[^.;]{0,80}?applications?\s+per\s*(?:calendar\s*)?year\s*:?\s*(\d+)/i,
     /(\d+)\s*applications?\s*per\s*(?:calendar\s*)?year/i,
-    /maximum[^.;]{0,30}?(\d+)\s*applications?[^.;]{0,20}?per\s*year/i
+    /maximum[^.;]{0,30}?(\d+)\s*applications?[^.;]{0,20}?per\s*year/i,
+    /Maximum\s+of\s+(\d+)\s*applications?[^.;]{0,30}?(?:per\s+year|12-month\s+period)/i,
+    /Maximum\s+of\s+(\d+)\s*applications?\s+per\s+crop\s+per\s+year/i
   ],
   maxTotalCC: [
     /A\.?\s*I\.?\s*Max\s*Total\s*Rate\/?\s*C\.?\s*C\.?[^\d]{0,60}(\d+(?:\.\d+)?)/i,
@@ -953,7 +956,13 @@ const FIELD_PATTERNS = {
   ],
   mri: [
     /(?:minimum\s+retreatment\s+interval|MRI)[^.;\n]{0,25}?(\d+\s*(?:days?)?)/i,
-    /(?:retreat|repeat)[^.;\n]{0,40}?(\d+)\s*days?/i
+    /(?:retreat|repeat)[^.;\n]{0,40}?(\d+)\s*days?/i,
+    // "Retreatment Interval (RTI): Minimum of 90 days"
+    /Retreatment\s+Interval\s*\(?RTI\)?\s*:?\s*(?:Minimum\s+of\s+)?(\d+)\s*days?/i,
+    // "Allow at least 90 days between applications"
+    /Allow\s+at\s+least\s+(\d+)\s+days\s+between\s+applications/i,
+    // "Apply at least 30 days before/prior to planting" (preplant interval)
+    /Apply.*?at\s+least\s+(\d+)\s+days?\s+(?:before|prior\s+to)\s+(?:planting|crop\s+emergence)/i
   ],
   rei: [
     /(?:restricted[\s-]entry\s+interval(?:\s*\(REI\))?|REI)[^.;\n]{0,50}?(\d+\s*(?:hours?|hrs?|hour\(s\)|hr\(s\)))/i,
@@ -1524,13 +1533,17 @@ function rowFromBlock(useName, block, doc) {
   // "Product Rate (fl oz/A) ... 3.5 – 7.0"
   const prodRateM = block.match(
     /Product\s+Rate\s*\(fl\s*oz\/A\)[^\d]{0,60}(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)/i);
+  // "Rate: 6.8 – 10.2 fl oz per acre" (Icafolin/herbicide table format)
+  const flOzRateM = !prodRateM && block.match(
+    /Rate:\s*([\d.]+(?:\s*[–\-]\s*[\d.]+)?)\s*fl\s*oz\s+per\s+acre/i);
   // "Do not apply more than 14 fl oz of SIVANTO 400 SL"
   const capM = block.match(
     /(?:do\s+not\s+apply\s+more\s+than|maximum(?:\s+of)?)\s*(\d+(?:\.\d+)?)\s*fl\s*oz/i);
 
   if (conc) {
-    if (!lbAi && prodRateM) {
-      const r = parseRateRange(prodRateM[1]);
+    const rateStr = prodRateM ? prodRateM[1] : (flOzRateM ? flOzRateM[1] : null);
+    if (!lbAi && rateStr) {
+      const r = parseRateRange(rateStr);
       if (r) {
         const lo = flOzToLbAi(r.low, conc);
         const hi = flOzToLbAi(r.high, conc);
@@ -1983,18 +1996,15 @@ function findTableRowSections(text) {
   const triggerIdx = lines.findIndex(l => TRIGGER_RE.test(l));
   if (triggerIdx < 0) return out;
 
-  // An ALL-CAPS line is a crop heading if it:
-  //  - Consists only of uppercase letters, spaces, commas, slashes, parens, hyphens
-  //  - Is a known crop term (or starts with one)
-  //  - Is not a structural keyword (APPLICATION, RATE, RESTRICTIONS…)
-  const STRUCTURAL = /^(?:APPLICATION|RATE|CROPS|TIMING|RESTRICTIONS|PRECAUTIONS|COMPATIBILITY|RESISTANCE|ROTATIONAL|CROP\s+TOLERANCE|PRODUCT|USE\s+RESTRICTIONS|SPRAY\s+DRIFT|DIRECTIONS|SPECIFIC|STORAGE|DISPOSAL|FIRST\s+AID|PRECAUTIONARY|HAZARDS|PERSONAL|USER\s+SAFETY|ENGINEERING|ENVIRONMENTAL|MANDATORY|MANAGEMENT|LIABILITY|WARRANTY|INCIDENTAL|AGRICULTURAL)\b/i;
+  // Structural keywords that look like headings but are not crop sections
+  const STRUCTURAL = /^(?:APPLICATION(?:\s+TIMING|\s+INSTRUCTIONS)?|RATE|CROPS|TIMING|RESTRICTIONS|PRECAUTIONS|COMPATIBILITY|RESISTANCE|ROTATIONAL|CROP\s+TOLERANCE|PRODUCT|USE\s+RESTRICTIONS|SPRAY\s+DRIFT|DIRECTIONS|SPECIFIC|STORAGE|DISPOSAL|FIRST\s+AID|PRECAUTIONARY|HAZARDS|PERSONAL|USER\s+SAFETY|ENGINEERING|ENVIRONMENTAL|MANDATORY|MANAGEMENT|LIABILITY|WARRANTY|INCIDENTAL|AGRICULTURAL|PREPLANT\s+BURNDOWN)\b/i;
 
-  // Build a fast lookup: does the (case-insensitive) line start with a known crop?
-  const cropSet = new Set(CROP_TERMS_SORTED.map(t => t.toLowerCase()));
   const cropRe = new RegExp(
     '^(' + CROP_TERMS_SORTED.slice(0, 300).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b',
     'i'
   );
+  // "APPLICATION DIRECTIONS FOR USE IN [CROP]" format (used by some fruit labels)
+  const appDirRe = /^APPLICATION\s+DIRECTIONS\s+FOR\s+USE\s+IN\s+(.+)/i;
 
   let pos = 0;
   for (let j = 0; j < triggerIdx; j++) pos += lines[j].length + 1;
@@ -2007,13 +2017,19 @@ function findTableRowSections(text) {
     linePos += line.length + 1;
 
     if (trimmed.length < 3 || trimmed.length > 80) continue;
-    // Must be an all-caps line (headings only)
-    if (!/^[A-Z][A-Z0-9\s,\/\(\)\-–.]+$/.test(trimmed)) continue;
     if (STRUCTURAL.test(trimmed)) continue;
-    // Must start with a crop term
-    if (!cropRe.test(trimmed)) continue;
 
-    candidates.push({ name: cleanUseName(trimmed), pos: linePos - line.length - 1 });
+    // Accept crop headings regardless of case (handles "FIELD CORN (Grain and Silage)")
+    let cropName = null;
+    const appDirMatch = trimmed.match(appDirRe);
+    if (appDirMatch) {
+      cropName = cleanUseName(appDirMatch[1].trim());
+    } else if (cropRe.test(trimmed)) {
+      cropName = cleanUseName(trimmed);
+    }
+    if (!cropName || cropName.length < 3) continue;
+
+    candidates.push({ name: cropName, pos: linePos - line.length - 1 });
   }
 
   if (!candidates.length) return out;
@@ -2035,6 +2051,22 @@ function findTableRowSections(text) {
 /** Finds every use section in the label, with its text span. */
 function findUseSections(text) {
   const found = [];
+
+  // R29: Labels with 'SPECIFIC CROP DIRECTIONS' organise uses as crop-name headings.
+  // Prioritise table-row detection for these so product-level target-heading matches
+  // don't consume the entire document as a single section.
+  if (/SPECIFIC\s+CROP\s+DIRECTIONS/i.test(text)) {
+    const tableSections = findTableRowSections(text);
+    if (tableSections.length > 0) {
+      return tableSections.map((s, i) => {
+        const end = i + 1 < tableSections.length
+          ? tableSections[i + 1].start
+          : Math.min(text.length, s.start + 3000);
+        return { ...s, end };
+      });
+    }
+  }
+
   let lastKey = null;
   for (const m of text.matchAll(SECTION_TARGET_RE)) {
     const raw = headingBefore(text, m.index);
