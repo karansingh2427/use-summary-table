@@ -170,13 +170,14 @@ def score(app_csv: str, gt_csv: str) -> None:
     present = sum(1 for c in schema_cols if c in app_cols)
     schema_pct = round(100 * present / len(schema_cols))
 
-    # Scorable GT columns — those that have a counterpart in the app schema
+    # Score only columns present in BOTH ground truth and app output.
     def gt_col_to_app_col(gt_col: str) -> str:
         return GT_TO_APP.get(gt_col, gt_col)
 
     scorable_gt_cols = [
         c for c in gt_rows[0].keys()
-        if gt_col_to_app_col(c) not in APP_ONLY
+        if gt_col_to_app_col(c) in app_cols          # must exist in app output
+        and gt_col_to_app_col(c) not in APP_ONLY     # must not be app-only
     ]
 
     # Per-label tracking
