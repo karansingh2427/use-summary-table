@@ -964,7 +964,7 @@ const FIELD_PATTERNS = {
   // Drift parameters: wind speed, buffer distances, release height, droplet size.
   drift: [
     /(Wind\s+speed\s+limit[^.;\n]{0,80})/i,
-    /(Buff[a-z]+\s+(?:for|distance)[^.;\n]{0,120})/i,
+    /(Buffers?\s+for\s+(?:orchard|citrus|all|crops?|trees?|fruits?|vineyards?|aerial)[^.;\n]{0,120})/i,
     /(Max(?:imum)?\.?\s*Release\s+Height\s*\(?ft\)?\s*:?\s*\d+)/i,
     /(ASABE\s+Droplet\s+Size\s*:?\s*[A-Za-z]+(?:\s+or\s+[A-Za-z]+)?)/i,
     /(Max(?:imum)?\.?\s*boom\s+height\s*:?\s*[^.;\n]{0,30})/i
@@ -974,6 +974,8 @@ const FIELD_PATTERNS = {
   soil: [
     /(Any\s+soil\s+except[^.;\n]{0,120})/i,
     /(DO\s+NOT\s+use\s+on\s+soils?\s+[^.;\n]{0,120})/i,
+    /(Place\s+(?:this\s+product|[A-Z][A-Za-z0-9\s®™.]+?)\s+\d[^.;\n]{0,80}inch[^.;\n]{0,80})/i,
+    /(For\s+(?:soil\s+)?(?:injection|drench|incorporation)[^.;\n]{0,120})/i,
     /(DO\s+NOT\s+apply\s+to\s+water-?saturated\s+soils?[^.;\n]{0,100})/i,
     /(Place\s+(?:the\s+)?product\s+\d[^.;\n]{0,80}below\s+(?:the\s+)?seed\s+line[^.;\n]{0,40})/i,
     /(For\s+injection:\s*Place[^.;\n]{0,120})/i,
@@ -1562,10 +1564,17 @@ function rowFromBlock(useName, block, doc) {
   if (doc.__restr === undefined) {
     const geoProduct = allMatches(doc.fullText, FIELD_PATTERNS.geographicProduct);
     const driftAll   = allMatches(doc.fullText, FIELD_PATTERNS.drift);
+    // Product-wide additional restrictions (tank-mix bans etc.) often appear
+    // in a preamble before individual crop sections.
+    const addlAll = allMatches(doc.fullText, [
+      /(DO\s+NOT\s+tank\s+mix[^.\n]{0,280})/gi,
+      /(DO\s+NOT\s+apply\s+(?:non-?ionic\s+surfactants?|horticultural\s+oils?)[^.\n]{0,200})/gi,
+    ]);
     doc.__restr = {
       geo:   geoProduct ? geoProduct.replace(/\s+/g, " ").trim() : null,
       drift: driftAll || null,
-      nont:  allMatches(doc.fullText, FIELD_PATTERNS.nonTarget)
+      nont:  allMatches(doc.fullText, FIELD_PATTERNS.nonTarget),
+      addl:  addlAll || null
     };
   }
 
@@ -1574,7 +1583,9 @@ function rowFromBlock(useName, block, doc) {
   const geo   = geoBlock
     ? (doc.__restr.geo ? `${doc.__restr.geo}; ${geoBlock}` : geoBlock)
     : doc.__restr.geo;
-  const drift = allMatches(block, FIELD_PATTERNS.drift) || doc.__restr.drift;
+  // Block-specific drift wins; product-wide fallback excluded — it often picks
+  // up the wrong paragraph from a different crop or application type context.
+  const drift = allMatches(block, FIELD_PATTERNS.drift);
   const soil  = allMatches(block, FIELD_PATTERNS.soil);
   const nont  = allMatches(block, FIELD_PATTERNS.nonTarget) || doc.__restr.nont;
 
@@ -1592,7 +1603,7 @@ function rowFromBlock(useName, block, doc) {
   // Allow semicolons within captures so multi-clause restrictions aren't truncated.
   const other = allMatches(block, [
     /((?:DO\s+NOT\s+tank\s+mix[^.\n]{0,280}|DO\s+NOT\s+graze[^.\n]{0,140}|The\s+use\s+of\s+[A-Z][^.\n]{0,280}prohibited[^.\n]{0,80}|DO\s+NOT\s+apply\s+(?:non-?ionic\s+surfactants?|horticultural\s+oils?|prior\s+to|through\s+any)[^.\n]{0,200}))/gi
-  ]);
+  ]) || doc.__restr.addl;
   if (other) row["Additional Restrictions for Use/Use Site"] = other;
 
   return row;

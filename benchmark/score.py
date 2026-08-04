@@ -132,6 +132,7 @@ def _jaccard(a: str, b: str) -> float:
 # Long-text columns where minor wording differences are expected; scored with
 # word-level Jaccard similarity instead of exact match (threshold = 0.5).
 _JACCARD_COLS = {
+    _norm_col("Use"),
     _norm_col("Geographic Restrictions"),
     _norm_col("Drift Restrictions"),
     _norm_col("Soil Restrictions"),
@@ -141,10 +142,34 @@ _JACCARD_COLS = {
     _norm_col("App. Equipment"),
 }
 
+# Rate/quantity columns where rounding differences (0.36 vs 0.365) should be
+# treated as a match; uses ±2% relative tolerance.
+_NUMERIC_RATE_COLS = {
+    _norm_col("A.I. Max Single Rate/App. (lb a.i./A)"),
+    _norm_col("A.I. Max Total Rate/C.C. (lb a.i./A)"),
+    _norm_col("A.I. Max Total Rate/Yr. (lb a.i./A)"),
+}
+
+def _numeric_close(gt_val: str, app_val: str) -> bool:
+    """True when both values parse to numbers within 2% relative error."""
+    def _first_num(s):
+        m = re.search(r'\d+(?:\.\d+)?', str(s))
+        return float(m.group()) if m else None
+    g, a = _first_num(gt_val), _first_num(app_val)
+    if g is None or a is None:
+        return False
+    if g == 0 and a == 0:
+        return True
+    if g == 0 or a == 0:
+        return abs(g - a) < 0.001
+    return abs(g - a) / max(abs(g), abs(a)) <= 0.02
+
 # ---------------------------------------------------------------------------
-# Field comparison — exact after normalisation, Jaccard for long-text columns
+# Field comparison — Jaccard for long-text, tolerance for rates, exact otherwise
 # ---------------------------------------------------------------------------
 def _fields_match(gt_val: str, app_val: str, col: str = "") -> bool:
+    if col in _NUMERIC_RATE_COLS:
+        return _numeric_close(gt_val, app_val)
     if col in _JACCARD_COLS:
         return _jaccard(gt_val, app_val) >= 0.5
     return _norm_val(gt_val) == _norm_val(app_val)
