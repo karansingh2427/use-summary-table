@@ -1984,66 +1984,75 @@ function findGenericAllCapsSections(text) {
   return out;
 }
 
-/** R29 — Detect standalone ALL-CAPS crop headings in labels that list crops as
- *  separate sections without a trailing FOLIAR/SOIL keyword (e.g. Icafolin labels
- *  which have "SOYBEAN\n[directions]...\nFIELD CORN\n[directions]..." after the
- *  "SPECIFIC CROP DIRECTIONS" header).
+/** R29 — Detect crop-name section headings in labels that organise uses as
+ *  crop sections (e.g. Icafolin). Works for both standalone headings ('SOYBEAN\n')
+ *  and inline headings ('SOYBEAN APPLICATION TIMING...') as PDF.js sometimes
+ *  concatenates a heading with the following subheading on the same text run.
  */
 function findTableRowSections(text) {
   const out = [];
-  const lines = text.split('\n');
 
-  // Only scan sections that follow known "use-listing" headers.
-  const TRIGGER_RE = /SPECIFIC\s+CROP\s+DIRECTIONS|DIRECTIONS\s+FOR\s+USE|CROP\s+USE\s+DIRECTIONS|USE\s+DIRECTIONS/i;
-  const triggerIdx = lines.findIndex(l => TRIGGER_RE.test(l));
-  if (triggerIdx < 0) return out;
+  // Only scan text that follows a known use-listing trigger.
+  const TRIGGER_RE = /SPECIFIC\s+CROP\s+DIRECTIONS|DIRECTIONS\s+FOR\s+USE|CROP\s+USE\s+DIRECTIONS/i;
+  const triggerMatch = TRIGGER_RE.exec(text);
+  if (!triggerMatch) return out;
+  const triggerPos = triggerMatch.index;
 
-  // Structural keywords that look like headings but are not crop sections
-  const STRUCTURAL = /^(?:APPLICATION(?:\s+TIMING|\s+INSTRUCTIONS)?|RATE|CROPS|TIMING|RESTRICTIONS|PRECAUTIONS|COMPATIBILITY|RESISTANCE|ROTATIONAL|CROP\s+TOLERANCE|PRODUCT|USE\s+RESTRICTIONS|SPRAY\s+DRIFT|DIRECTIONS|SPECIFIC|STORAGE|DISPOSAL|FIRST\s+AID|PRECAUTIONARY|HAZARDS|PERSONAL|USER\s+SAFETY|ENGINEERING|ENVIRONMENTAL|MANDATORY|MANAGEMENT|LIABILITY|WARRANTY|INCIDENTAL|AGRICULTURAL|PREPLANT\s+BURNDOWN)\b/i;
+  // Build a regex that matches a crop term at the start of a line OR preceded
+  // by a section separator (newline, form-feed, or page-number prefix like "14 ").
+  const cropTermPattern = CROP_TERMS_SORTED.slice(0, 300)
+    .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
 
-  const cropRe = new RegExp(
-    '^(' + CROP_TERMS_SORTED.slice(0, 300).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b',
-    'i'
+  // Match: (start of line / newline / ff) + optional page-number prefix + crop term
+  // followed by: space+continuation-word OR newline OR end-of-string
+  // Handles both standalone heading ("SOYBEAN\n") and inline heading preceded by
+  // a PDF page-number prefix ("14 SOYBEAN APPLICATION TIMING...").
+  const CONTINUATION = 'APPLICATION|CROPS|RESTRICTIONS|PRECAUTIONS|PREPLANT|POST-PLANT|SPECIFIC|DOSE|RATE|USE|$|\\n';
+  const cropHeadingRe = new RegExp(
+    '(?:^|\\n|\\f|\\x0c)\\s*(?:\\d{1,2}\\s+)?(' + cropTermPattern + ')\\s*(?=(?:' + CONTINUATION + '))',
+    'gim'
   );
-  // "APPLICATION DIRECTIONS FOR USE IN [CROP]" format (used by some fruit labels)
-  const appDirRe = /^APPLICATION\s+DIRECTIONS\s+FOR\s+USE\s+IN\s+(.+)/i;
 
-  let pos = 0;
-  for (let j = 0; j < triggerIdx; j++) pos += lines[j].length + 1;
+  // "APPLICATION DIRECTIONS FOR USE IN [CROP]" format (used by fruit/vine labels)
+  const appDirRe = new RegExp(
+    '(?:^|\\n)\\s*(APPLICATION\\s+DIRECTIONS\\s+FOR\\s+USE\\s+IN\\s+(' + cropTermPattern + '))',
+    'gim'
+  );
 
   const candidates = [];
-  let linePos = pos;
-  for (let i = triggerIdx; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    linePos += line.length + 1;
-
-    if (trimmed.length < 3 || trimmed.length > 80) continue;
-    if (STRUCTURAL.test(trimmed)) continue;
-
-    // Accept crop headings regardless of case (handles "FIELD CORN (Grain and Silage)")
-    let cropName = null;
-    const appDirMatch = trimmed.match(appDirRe);
-    if (appDirMatch) {
-      cropName = cleanUseName(appDirMatch[1].trim());
-    } else if (cropRe.test(trimmed)) {
-      cropName = cleanUseName(trimmed);
-    }
-    if (!cropName || cropName.length < 3) continue;
-
-    candidates.push({ name: cropName, pos: linePos - line.length - 1 });
-  }
-
-  if (!candidates.length) return out;
-
-  // Build sections: each section spans from its start to the next candidate start.
   const seen = new Set();
-  for (let i = 0; i < candidates.length; i++) {
-    const { name, pos: start } = candidates[i];
-    const key = name.toLowerCase();
+
+  // Scan the text after the trigger for crop headings
+  const searchText = text.slice(triggerPos);
+  const searchOffset = triggerPos;
+
+  for (const m of searchText.matchAll(cropHeadingRe)) {
+    const cropName = cleanUseName(m[1]);
+    if (!cropName || cropName.length < 3) continue;
+    const key = cropName.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    const end = i + 1 < candidates.length ? candidates[i + 1].pos : Math.min(text.length, start + 3000);
+    candidates.push({ name: cropName, pos: searchOffset + m.index });
+  }
+
+  for (const m of searchText.matchAll(appDirRe)) {
+    const cropName = cleanUseName(m[2] || m[1]);
+    if (!cropName || cropName.length < 3) continue;
+    const key = cropName.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({ name: cropName, pos: searchOffset + m.index });
+  }
+
+  // Sort by position and build sections
+  candidates.sort((a, b) => a.pos - b.pos);
+
+  for (let i = 0; i < candidates.length; i++) {
+    const { name, pos: start } = candidates[i];
+    const end = i + 1 < candidates.length
+      ? candidates[i + 1].pos
+      : Math.min(text.length, start + 3000);
     out.push({ useName: name, target: 'SOIL', start, end, detector: 'allcaps-crop-heading' });
   }
 
