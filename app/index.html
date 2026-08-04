@@ -133,6 +133,23 @@
   .qc-defects ul { margin: 0; padding-left: 18px; }
   .qc-defects li { margin-bottom: 4px; }
 
+  .warnings {
+    margin-top: 18px; background: #fffaeb; border: 1px solid #fedf89;
+    border-radius: 10px; padding: 0; color: #7a2e0e; font-size: 14px;
+  }
+  .warnings-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 14px; cursor: pointer; user-select: none;
+  }
+  .warnings-header:hover { background: rgba(122, 46, 14, .03); }
+  .warnings-toggle { font-size: 18px; transition: transform .2s; }
+  .warnings.collapsed .warnings-toggle { transform: rotate(-90deg); }
+  .warnings-content {
+    max-height: 1000px; overflow: hidden; transition: max-height .25s ease;
+    border-top: 1px solid #fedf89; padding: 14px;
+  }
+  .warnings.collapsed .warnings-content { max-height: 0; border-top: none; padding: 0; }
+
   .review-gate {
     display: none;
     margin-top: 12px;
@@ -2920,11 +2937,15 @@ function runRuntimeQcGate(rows, documents, schemaFailures) {
   The missing-crop cross-check needs the label text from the current
   extraction. If no extracted documents are present, skip this check
   rather than reporting a false all-clear.
+  
+  Warnings are collapsible by default to reduce visual clutter while
+  maintaining QC information availability.
 ------------------------------------------------------------------ */
 function renderWarnings(rows) {
   const warns = coverageWarnings(rows, window.__extractedDocuments);
   if (!warns.length) { warningsEl.style.display = "none"; return; }
   warningsEl.style.display = "block";
+  warningsEl.classList.add("collapsed");
   const missing = warns.filter(w => w.rows === 0);
   const sparse  = warns.filter(w => w.rows > 0);
   const section = (list, heading) => list.length ? `
@@ -2932,9 +2953,23 @@ function renderWarnings(rows) {
     <ul>${list.map(w =>
       `<li><b>${esc(w.crop)}</b> (page ${esc(w.pages)}) — ${esc(w.detail)}. Check the label directly.</li>`
     ).join("")}</ul>` : "";
-  warningsEl.innerHTML =
-    section(missing, "⚠ Crops named in the label with no row at all") +
-    section(sparse,  "⚠ Rows that may be under-read");
+  warningsEl.innerHTML = `
+    <div class="warnings-header">
+      <span><strong>QC Warnings</strong> — Informational only (${warns.length})</span>
+      <span class="warnings-toggle">▸</span>
+    </div>
+    <div class="warnings-content">
+      ${section(missing, "⚠ Crops named in the label with no row at all")}
+      ${section(sparse,  "⚠ Rows that may be under-read")}
+    </div>
+  `;
+  // Attach toggle handler
+  const header = warningsEl.querySelector(".warnings-header");
+  if (header) {
+    header.addEventListener("click", () => {
+      warningsEl.classList.toggle("collapsed");
+    });
+  }
 }
 
 /* --- TASK 12 (R17) — sorting state -------------------------------- */
