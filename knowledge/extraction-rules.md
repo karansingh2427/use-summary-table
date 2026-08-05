@@ -260,6 +260,38 @@ exactly this season=year reasoning, not by re-reading the label for a number it 
 
 ---
 
+## R-16 · An "Or" between two timing phrasings is one row, not two — and never emit a literal duplicate
+
+R-1 splits rows on a genuine difference in use, use site, or application method. It is not a
+license to split on every distinct sentence a label uses to describe timing.
+
+USH679EC412's CANOLA AND PULSE section states the same application window twice, in different
+words, for the same crop group: once in the section-level "Preplant Burndown" heading ("applied
+as a broadcast treatment at least 1 day before or within 3 days after planting canola and pulses
+but prior to crop emergence"), and again inside the bean sub-block as an explicit either/or:
+"Crops: Pre-plant surface. Apply on the day of planting. **Or** Post-plant pre-emergence: Apply
+within 3 days after planting but prior to crop emergence." Rate, tank-mix requirement, and weeds
+controlled are identical either way — this is one continuous timing window described from two
+angles, not two separate uses.
+
+**Mistake logged:** the AI extraction path emitted 4 rows for this single use: one for each half
+of the "Or" (Pre-plant surface / Post-plant pre-emergence), one row that was a byte-for-byte
+duplicate of another, and one that only restated the crop list with more of the pulse-crop
+varieties spelled out. An analyst reading this label writes one row, with the Application Timing
+field carrying both halves of the "Or" (e.g. "Preplant surface, on the day of planting, or
+post-plant pre-emergence within 3 days after planting — prior to crop emergence either way").
+
+**Rule:** before splitting a use into multiple rows, confirm rate, use site, *and* application
+method actually differ (R-1). Two sentences that describe alternative ways of timing the *same*
+application to the *same* crop group at the *same* rate — joined by "or", "either...or", "may be
+applied as A or B" — belong in one row's Application Timing field, not one row each. A crop list
+being restated with more specific varieties later in the same block is the same crop group, not
+a new one. And regardless of the reasoning above: two rows with identical values in every column
+except a cosmetic wording difference are never a valid reading of the label — that is a literal
+duplicate and must be collapsed to one row.
+
+---
+
 ## Pre-flight checklist
 
 Before releasing a table:
@@ -273,6 +305,7 @@ Before releasing a table:
 - [ ] Restrictions routed to the right column (**R-7**)
 - [ ] Restriction scope determined — product-wide restrictions propagated to every row, method-scoped restrictions gated `NA` on non-matching methods, crop-scoped restrictions confined to their own rows (**R-14**)
 - [ ] Per-crop-season caps checked against the crop's season count — treated as the per-year cap when the label shows only one season/year for that crop, left `NS` only when the label indicates more than one season is possible (**R-15**)
+- [ ] No row split solely on alternative timing wording ("X or Y" for the same crop/rate/method), and no two rows are literal duplicates of each other (**R-16**)
 - [ ] PPE, MRI, REI, App Rate all populated (**R-8**)
 - [ ] C.C. and Yr columns distinguished; cross-check applied (**R-9**)
 - [ ] AI-level annual caps captured (**R-10**)
