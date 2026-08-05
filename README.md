@@ -134,6 +134,26 @@ The parser is heuristic, so the app is built for human verification:
   table, so under-read sections are obvious.
 - **Inline editing** — corrected cells are marked and flow through to both exports.
 
+## AI extraction (pilot)
+
+The "🤖 Extract with AI" toggle (on by default) routes a label's full text through
+`functions/api/extract.js`, a Cloudflare Pages Function, which has the model read the
+label and apply `knowledge/extraction-rules.md` / `derivation-rules.md` directly instead
+of pattern-matching regex. This generalizes to label layouts the regex heuristics don't
+cover, at the cost of needing network access and a few seconds of latency per label.
+
+**This is a small pilot, not a production rollout.** The Function forwards to Bayer's
+internal myGenAssist (mGA) gateway using one shared mGA token supplied by a single
+colleague, stored only as an encrypted Cloudflare Pages environment variable — never in
+this repo. Bayer's own guidance is that sharing one person's mGA token this way is
+acceptable only for a handful of colleagues (2-3), not a broad rollout. Scaling this to
+the wider team needs the DSE-app route instead (a real service-account credential, an
+ITLM governance review at `go/beat`, and an Agent Hub listing) — a separate, larger
+undertaking.
+
+Untick the toggle to fall back to the instant, offline, zero-network regex path described
+above at any time.
+
 ## Output schema
 
 The 27-column Use Summary Table defined in `knowledge/UST_definitions.txt`. Column meanings

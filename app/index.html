@@ -419,28 +419,17 @@
       <button class="primary" id="runBtn" disabled>Run Extraction</button>
       <button class="ghost" id="clearBtn" disabled>Clear</button>
       <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.9em">
-        <input type="checkbox" id="llmExtractToggle" />
+        <input type="checkbox" id="llmExtractToggle" checked />
         🤖 Extract with AI
       </label>
-      <button class="ghost" type="button" id="llmSettingsBtn">AI Settings</button>
       <span class="status" id="status" role="status" aria-live="polite">No files selected.</span>
     </div>
 
-    <!-- LLM extraction — reads label prose and reasons through the same
+    <!-- AI extraction — reads label prose and reasons through the same
          extraction/derivation rules the Copilot extraction agent uses,
-         instead of pattern-matching regex. Opt-in; requires the user's own
-         personal myGenAssist (mGA) token, stored only in this browser. -->
-    <div class="notice" id="llmSettingsPanel" role="group" aria-label="AI extraction settings" style="display:none;align-items:flex-start;flex-direction:column;gap:8px">
-      <strong>AI Extraction Settings</strong>
-      <span class="sub">Uses Bayer's myGenAssist (mGA) gateway. Get your own personal token from myGenAssist → Settings → Token Management → Create token. It's stored only in this browser (localStorage), sent only to chat.int.bayer.com, never sent anywhere else and never committed — it's billed to your own mGA budget, so don't share it with anyone else.</span>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%">
-        <label for="llmApiKeyInput">myGenAssist token:</label>
-        <input type="password" id="llmApiKeyInput" placeholder="mga-..." autocomplete="off" style="flex:1;min-width:220px" />
-        <button class="primary" type="button" id="llmApiKeySaveBtn">Save token</button>
-        <button class="ghost" type="button" id="llmApiKeyClearBtn">Clear token</button>
-      </div>
-      <span class="sub" id="llmApiKeyStatus"></span>
-    </div>
+         instead of pattern-matching regex. Routed through /api/extract, a
+         Cloudflare Pages Function that holds one shared pilot myGenAssist
+         (mGA) credential server-side — no per-user setup or key needed. -->
 
     <div class="bar" id="bar" role="progressbar" aria-label="Extraction progress"
          aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
@@ -658,60 +647,13 @@ let pendingRun = null;   // run parked awaiting the analyst's choice
 const logEl    = document.getElementById("log");
 
 // AI extraction — reads label prose and reasons through EXTRACTION_RULES_MD /
-// DERIVATION_RULES_MD via a direct call to Bayer's myGenAssist (mGA) gateway
-// using the user's own personal mGA token, instead of pattern-matching
-// regex. Opt-in; the token never leaves the browser except in the one
-// fetch() call to chat.int.bayer.com.
-const LLM_API_KEY_STORAGE_KEY = "ust_mga_token";
-const llmExtractToggle  = document.getElementById("llmExtractToggle");
-const llmSettingsBtn    = document.getElementById("llmSettingsBtn");
-const llmSettingsPanel  = document.getElementById("llmSettingsPanel");
-const llmApiKeyInput    = document.getElementById("llmApiKeyInput");
-const llmApiKeySaveBtn  = document.getElementById("llmApiKeySaveBtn");
-const llmApiKeyClearBtn = document.getElementById("llmApiKeyClearBtn");
-const llmApiKeyStatus   = document.getElementById("llmApiKeyStatus");
-
-function getSavedLlmApiKey() {
-  return localStorage.getItem(LLM_API_KEY_STORAGE_KEY) || "";
-}
-
-function renderLlmApiKeyStatus() {
-  const key = getSavedLlmApiKey();
-  llmApiKeyStatus.textContent = key
-    ? `A key is saved (ending …${key.slice(-4)}).`
-    : "No key saved yet — AI extraction will prompt for one.";
-}
-
-// A saved key means the user has already opted in once, so AI extraction
-// becomes the default going forward; a fresh install with no key still runs
-// the free/offline regex path with no setup required.
-llmExtractToggle.checked = !!getSavedLlmApiKey();
-renderLlmApiKeyStatus();
-
-llmSettingsBtn.addEventListener("click", () => {
-  const opening = llmSettingsPanel.style.display === "none" || !llmSettingsPanel.style.display;
-  llmSettingsPanel.style.display = opening ? "flex" : "none";
-  if (opening) {
-    llmApiKeyInput.value = getSavedLlmApiKey();
-    llmApiKeyInput.focus();
-  }
-});
-
-llmApiKeySaveBtn.addEventListener("click", () => {
-  const key = llmApiKeyInput.value.trim();
-  if (!key) return;
-  localStorage.setItem(LLM_API_KEY_STORAGE_KEY, key);
-  llmExtractToggle.checked = true;
-  renderLlmApiKeyStatus();
-  llmSettingsPanel.style.display = "none";
-});
-
-llmApiKeyClearBtn.addEventListener("click", () => {
-  localStorage.removeItem(LLM_API_KEY_STORAGE_KEY);
-  llmApiKeyInput.value = "";
-  llmExtractToggle.checked = false;
-  renderLlmApiKeyStatus();
-});
+// DERIVATION_RULES_MD via /api/extract, a Cloudflare Pages Function that
+// holds one shared pilot myGenAssist (mGA) credential server-side and relays
+// the request. No per-colleague token/setup — on by default.
+const llmExtractToggle = document.getElementById("llmExtractToggle");
+// Ships in page JS — a scanner deterrent on the public relay endpoint, not a
+// real secret. Must match PILOT_GATE_SECRET in functions/api/extract.js.
+const PILOT_GATE_HEADER_VALUE = "ust-pilot-2026";
 
 let files = [];
 
@@ -3707,16 +3649,16 @@ runBtn.addEventListener("click", async () => {
   await finishRun(documents, totalPages, actives[0] ? actives[0].name : null);
 });
 
-/** Reads a label's full text via a direct call to Bayer's myGenAssist (mGA)
- *  gateway — an Anthropic-Messages-API-compatible proxy at
- *  chat.int.bayer.com — using the user's own personal mGA token, and reasons
- *  through EXTRACTION_RULES_MD / DERIVATION_RULES_MD the same way the
- *  extraction-main-agent does, instead of pattern-matching regex. Returns
- *  rows in the same shape parseDocument() produces (built from blankRow(),
- *  scored via scoreRow()) so rendering and export need no separate code
- *  path. Throws on any API/network failure — callers must not silently fall
- *  back to regex. */
-async function extractWithLLM(doc, apiKey) {
+/** Reads a label's full text via /api/extract — a same-origin Cloudflare
+ *  Pages Function that holds one shared pilot myGenAssist (mGA) credential
+ *  server-side and relays to Bayer's mGA gateway — and reasons through
+ *  EXTRACTION_RULES_MD / DERIVATION_RULES_MD the same way the
+ *  extraction-main-agent does, instead of pattern-matching regex. No
+ *  per-colleague token needed. Returns rows in the same shape
+ *  parseDocument() produces (built from blankRow(), scored via scoreRow())
+ *  so rendering and export need no separate code path. Throws on any
+ *  API/network failure — callers must not silently fall back to regex. */
+async function extractWithLLM(doc) {
   const pageMarkedText = doc.pages
     .map((text, i) => `--- PAGE ${i + 1} ---\n${text}`)
     .join("\n\n");
@@ -3776,17 +3718,19 @@ async function extractWithLLM(doc, apiKey) {
     pageMarkedText
   ].join("\n");
 
-  const MGA_ENDPOINT = "https://chat.int.bayer.com/anthropic/v1/messages";
+  // Same-origin relay — the browser never talks to chat.int.bayer.com
+  // directly (no CORS dependency, no per-colleague credential). The Pages
+  // Function at functions/api/extract.js adds the shared pilot mGA
+  // credential server-side before forwarding.
+  const RELAY_ENDPOINT = "/api/extract";
   const MAX_TOKENS = 8192;
-  const response = await fetch(MGA_ENDPOINT, {
+  const response = await fetch(RELAY_ENDPOINT, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      // mGA is reached with a bearer token, not Anthropic's native x-api-key
-      // header — confirmed against how Claude Code itself authenticates to
-      // this same gateway (ANTHROPIC_AUTH_TOKEN -> Authorization: Bearer).
-      "authorization": `Bearer ${apiKey}`,
-      "anthropic-version": "2023-06-01"
+      // A static pilot-gate header, not a secret — deters scanners from
+      // hitting the public relay endpoint, since it proxies to a metered API.
+      "x-ust-pilot": PILOT_GATE_HEADER_VALUE
     },
     body: JSON.stringify({
       model: "claude-sonnet-4.6",
@@ -3843,19 +3787,6 @@ async function finishRun(documents, totalPages, selectedAi) {
   allRows = [];
 
   const useLLM = llmExtractToggle.checked;
-  const llmApiKey = getSavedLlmApiKey();
-  if (useLLM && !llmApiKey) {
-    llmSettingsPanel.style.display = "flex";
-    llmApiKeyInput.focus();
-    statusEl.textContent = "AI extraction needs a myGenAssist (mGA) token.";
-    noticeTx.textContent = "AI extraction is enabled but no mGA token is saved yet. Add one in AI Settings, then click Run Extraction again.";
-    noticeIc.textContent = "⚠";
-    noticeEl.classList.add("error");
-    noticeEl.style.display = "flex";
-    barEl.style.display = "none";
-    runBtn.disabled = clearBtn.disabled = false;
-    return;
-  }
 
   for (const doc of documents) {
     doc.selectedAi = selectedAi;
@@ -3872,7 +3803,7 @@ async function finishRun(documents, totalPages, selectedAi) {
       statusEl.textContent = `Extracting ${doc.fileName} with Claude…`;
       logEl.textContent += `\n→ ${doc.fileName}: extracting with AI (reads the full label and applies extraction-rules.md / derivation-rules.md)…\n`;
       try {
-        rows = await extractWithLLM(doc, llmApiKey);
+        rows = await extractWithLLM(doc);
         logEl.textContent += `   ${rows.length} use row(s) returned by the model\n`;
       } catch (err) {
         // Never silently fall back to regex — the user must know which path
