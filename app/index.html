@@ -3723,7 +3723,11 @@ async function extractWithLLM(doc) {
   // Function at functions/api/extract.js adds the shared pilot mGA
   // credential server-side before forwarding.
   const RELAY_ENDPOINT = "/api/extract";
-  const MAX_TOKENS = 8192;
+  // A label with dozens of crop sections needs a large structured-output
+  // budget — 8192 truncated so early on a ~85-crop label that zero complete
+  // rows made it into the response. Claude Sonnet 4.x supports much larger
+  // max_tokens directly (no beta header needed).
+  const MAX_TOKENS = 64000;
   const response = await fetch(RELAY_ENDPOINT, {
     method: "POST",
     headers: {
