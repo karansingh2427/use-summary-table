@@ -8,9 +8,13 @@
 // credential and an ITLM governance review (go/beat) — see README.md.
 //
 // Required Cloudflare Pages environment variables (set as encrypted secrets
-// in the dashboard — never committed here):
+// in the dashboard, Production environment — never committed here):
 //   MGA_TOKEN          the pilot's personal myGenAssist token
 //   PILOT_GATE_SECRET  must equal PILOT_GATE_HEADER_VALUE in app/index.html
+//
+// Env var changes only apply to deployments built after they were saved —
+// trigger a fresh deployment (push a commit, or Deployments tab -> ... ->
+// Retry deployment) any time these are added or changed.
 
 const MGA_UPSTREAM = "https://chat.int.bayer.com/anthropic/v1/messages";
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
