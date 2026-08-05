@@ -418,7 +418,28 @@
     <div class="actions">
       <button class="primary" id="runBtn" disabled>Run Extraction</button>
       <button class="ghost" id="clearBtn" disabled>Clear</button>
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.9em">
+        <input type="checkbox" id="llmExtractToggle" />
+        🤖 Extract with AI
+      </label>
+      <button class="ghost" type="button" id="llmSettingsBtn">AI Settings</button>
       <span class="status" id="status" role="status" aria-live="polite">No files selected.</span>
+    </div>
+
+    <!-- LLM extraction — reads label prose and reasons through the same
+         extraction/derivation rules the Copilot extraction agent uses,
+         instead of pattern-matching regex. Opt-in; requires the user's own
+         Anthropic API key, stored only in this browser. -->
+    <div class="notice" id="llmSettingsPanel" role="group" aria-label="AI extraction settings" style="display:none;align-items:flex-start;flex-direction:column;gap:8px">
+      <strong>AI Extraction Settings</strong>
+      <span class="sub">Your API key is stored only in this browser (localStorage) and sent directly to Anthropic's API — never sent anywhere else, never committed.</span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%">
+        <label for="llmApiKeyInput">Anthropic API key:</label>
+        <input type="password" id="llmApiKeyInput" placeholder="sk-ant-..." autocomplete="off" style="flex:1;min-width:220px" />
+        <button class="primary" type="button" id="llmApiKeySaveBtn">Save key</button>
+        <button class="ghost" type="button" id="llmApiKeyClearBtn">Clear key</button>
+      </div>
+      <span class="sub" id="llmApiKeyStatus"></span>
     </div>
 
     <div class="bar" id="bar" role="progressbar" aria-label="Extraction progress"
@@ -546,6 +567,17 @@ const NOT_APPLICABLE = "NA";
 
 // Metadata columns — tracked per row but not part of the exported schema body.
 // "Source File" identifies the label; "Page" (R12) and "Confidence" (R11) aid review.
+/** Verbatim copy of knowledge/extraction-rules.md, embedded so the browser app
+ *  (which has no backend and cannot fetch repo-root files in production) can
+ *  hand the same rules to the LLM that this session's agents read. If
+ *  knowledge/extraction-rules.md changes, re-copy it here manually — there is
+ *  no build step wiring the two together. */
+const EXTRACTION_RULES_MD = "# Extraction Rules \u2014 Distilled from Training Logs\n\nRules learned from corrected extractions. Read this **before** building or checking a table.\nEach rule traces to a real mistake recorded in `knowledge/training-logs/`.\n\nSources: `agent_training_chat_log.txt`, `plenexos_smart_training_log.txt`,\n`ush679sc470_training_log.txt`, `UST_definitions.txt`.\n\n---\n\n## R-1 \u00b7 One row = one use + one use site + one application method\n\nFrom `UST_definitions.txt`:\n\n> *\"each row should contain only one use, use site, and application instructions; some use\n> and use sites may be redundant while application methods differ\"*\n\nSIVANTO shows this repeatedly: **CITRUS FRUITS** appears twice \u2014 once Foliar, once Soil \u2014\nwith different rates, PHI, and restrictions. Collapsing them into one row is a **High**\ndefect.\n\n**Rule:** if a crop has both a foliar and a soil application, that is two rows. Do not merge.\n\n---\n\n## R-2 \u00b7 Purpose drives the schema\n\n> *\"to accurately document each product's uses, application methods and rates, and use\n> restrictions to facilitate ecological exposure modeling\"*\n\nThe table feeds **ecological exposure modeling**. That is why rates are expressed as\n**lb a.i./A** and why per-crop-cycle and per-year maxima are tracked separately. A rate in\nproduct units alone is not usable downstream.\n\n---\n\n## R-3 \u00b7 Split rates by active ingredient\n\nMulti-AI products need each AI called out separately with a consistent abbreviation.\n\n| Product | Correct form |\n|---|---|\n| USH679SC450 | `0.089 ICM; 0.045 IDF` |\n| USH679SC470 | `0.090 - 0.134 ICM; 0.241 - 0.358 FLU` |\n| PLENEXOS SMART | `0.18` with product noted as `(SPD+FPF: flupyradifurone rates)` |\n\n**Rule:** define the abbreviation once, then use it consistently. Never merge two AIs into\none number.\n\n**Mistake logged:** the PLENEXOS first pass wrote\n`0.086 (Spidoxamat); 0.18 (Flupyradifurone)` in the *single rate* column when the corrected\nanswer was `0.18` \u2014 the row was tracking flupyradifurone rates specifically.\n\n---\n\n## R-4 \u00b7 Rates may be conditional \u2014 carry the condition\n\nUSH679SC450 grape:\n\n```\n0.090 ICM; 0.045 IDF (<1% organic matter);\n0.133 ICM; 0.066 IDF (\u22651% organic matter)\n```\n\n**Rule:** never collapse a conditional rate to a single value or a bare range. The\ncondition (soil organic matter, region, formulation) is part of the value.\n\n---\n\n## R-5 \u00b7 Quote the label verbatim \u2014 never reuse wording from another label\n\n**The most serious logged mistake.** In the USH679SC470 extraction, adjuvant text was\npasted from the *previous label's* training prompt. The user caught it:\n\n> *\"are you sure this sentence is in the label?\"*\n\nThe sentences existed but in a **different order**, and the planting-depth sentence was\ntruncated \u2014 the real one ends *\"...to avoid washing and concentration of the herbicide in\nthe seed zone.\"*\n\n**Rule:** every phrase in an output cell must be copied from the label under review, at the\npage cited. Wording carried across from a golden example or an earlier log is a **Critical**\ndefect. Golden examples teach *shape*, never *content*.\n\n---\n\n## R-6 \u00b7 `NS` vs `NA` vs a value\n\nFrom `UST_definitions.txt`: `NS = Not Specified`, `NA = Not Applicable`.\n\nThese are different. `NS` means the label is silent. `NA` means the column does not apply to\nthis use. Cells are never blank.\n\n**Rule:** if the label limits applications per *crop season* but never states crop cycles per\nyear, then `Max # Apps/Yr` and `Max No. of CC/yr` are both `NS` \u2014 do not infer a number.\n\n---\n\n## R-7 \u00b7 Restrictions belong in their own columns\n\nFive distinct restriction columns exist, and content must be routed correctly:\n\n| Column | Gets |\n|---|---|\n| Geographic | *\"No aerial application in New York State\"*, *\"Not for use in CA\"* |\n| Drift | wind speed, boom height, droplet size, buffer distances |\n| Soil | *\"Any soil except those with 20% or greater gravel content\"*, incorporation depth |\n| On-field Non-target Species | pollinator protections, *\"during foraging by alfalfa leafcutting bees\"* |\n| Additional for Use/Use Site | tank-mix prohibitions, adjuvant prohibitions, grazing limits |\n\n**Mistake logged:** the PLENEXOS first pass buried drift buffers inside *Additional\nInformation*. Correction moved them to *Drift Restrictions*.\n\n---\n\n## R-8 \u00b7 Columns that are easy to miss\n\nCalled out explicitly in `ush679sc470_training_log.txt`:\n\n> *\"Notice the specific placement of 'App Rate (lb ai/A)', 'Minimum Retreatment Interval',\n> 'REI', and 'PPE'.\"*\n\n- **PPE** \u2014 extract separately, verbatim from the label's PPE section\n- **MRI** \u2014 distinct from PHI; easy to overlook\n- **REI** \u2014 in **hours**; PHI is in **days**. A swap is a **Critical** defect.\n- **App Rate (lb ai/A)** \u2014 the actual applied rate, distinct from *Max Single Rate*\n\n---\n\n## R-9 \u00b7 Per crop cycle \u2260 per year\n\nFour separate columns, easy to conflate:\n\n```\nMax # Apps / C.C.        A.I. Max Total Rate / C.C.\nMax # Apps / Yr.         A.I. Max Total Rate / Yr.\n```\n\nSIVANTO Alfalfa: max total per C.C. `0.365`, max total per year `0.365`, max CC/yr `1`.\nSIVANTO Brassica: per C.C. `0.365`, per year `1.095`, max CC/yr `3` \u2014 because 3 crop cycles\nare permitted.\n\n**Cross-check:** `Max Total Rate/Yr` \u2248 `Max Total Rate/C.C.` \u00d7 `Max No. of CC/yr`.\nWhere it does not hold, look for an AI-level annual cap and record that in Additional\nInformation.\n\n---\n\n## R-10 \u00b7 AI-level annual caps override per-product maths\n\n> *\"Maximum flupyradifurone per calendar year is 0.365 lb ai/A, regardless of formulation\n> or method of application.\"*\n\n> *\"If more than one flufenacet-containing product is applied to the same site within the\n> same year, do not exceed the allowed maximum total of 0.44 lb ai/A of flufenacet.\"*\n\n**Rule:** these caps are a required capture, not optional colour. They belong in\n*Additional Information*.\n\n---\n\n## R-11 \u00b7 Crop names: preserve the group and its exceptions\n\nCorrect forms observed:\n\n- `BRASSICA (COLE) LEAFY VEGETABLES (Crop Group 5)`\n- `SMALL FRUIT VINE CLIMBING - EXCEPT FUZZY KIWIFRUIT (Crop Subgroup 13-07F)`\n- `TREE NUTS (Crop Group 14-12) - EXCEPT ALMOND`\n- `ROOT VEGETABLES - EXCEPT SUGARBEET (Subgroup 1B)`\n\n**Rule:** never shorten to `Tree Nuts`. The **exception** is regulatory content \u2014 dropping it\nis a **Critical** defect. Keep the crop-group code.\n\nNote also `BLUEBERRY` appears as its own row *and* under `BUSHBERRY (13-07B)` with different\nvalues \u2014 a named crop inside a group can carry its own distinct entry.\n\n---\n\n## R-12 \u00b7 PHI may be conditional\n\n- `7-days hay, forage, sorghum grown for syrup, or sweet corn; 21-days dried grain, stover or straw`\n- `7 (Pomegranate); 14 (Other)`\n- `7 (forage/fresh seed); 21 (dry soybean seed)`\n\n**Rule:** carry the full conditional string. Never reduce to a single number.\n\n---\n\n## R-13 \u00b7 Plain text only for reference material\n\nFrom `agent_training_chat_log.txt`: `.rtf`/`.docx` carry hidden formatting that corrupts\nmachine reading. Keep everything in this folder as `.txt` or `.md`.\n\n---\n\n## R-14 \u00b7 A restriction's scope decides which *rows* get it, not just which column\n\nR-7 says which column a restriction goes in. This rule says which rows.\n\nLabels state restrictions at three different scopes, and each is handled differently:\n\n| Scope | Where it's stated | How to fill it |\n|---|---|---|\n| **Product-wide** | Once, in a general Precautions/Restrictions/Agricultural Use Requirements section that isn't tied to any one crop | Copy onto **every** row's matching column. Leaving it `NS` on rows the label never repeats it for is the mistake \u2014 the label said it once for the whole product, not once per row. |\n| **Method-scoped** | Stated for a physical application process (spray drift buffers, droplet size, release height, pollinator-foraging timing) | Copy onto every row that uses a matching method (foliar/aerial spray); `NA` on rows using a method the restriction can't apply to (soil injection, chemigation, drench) \u2014 the label did address the topic, it just doesn't reach that method. |\n| **Crop/section-scoped** | Stated inside one crop's own block (`Only For Use in: Idaho, Oregon and Washington` under Clover; `Not for use in Greenhouses` under a Planthouse row) | Copy **only** onto rows built from that section. |\n\n**SIVANTO 400 SL confirms this pattern directly** (`knowledge/golden-examples/golden_example_SIVANTO_400_SL.txt`):\nthe NY aerial/Nassau-Suffolk sale ban is product-wide and appears on all 44 rows; `Max Release\nHeight (ft): 10, ASABE Droplet Size: Coarse` and the pollinator-foraging note are method-scoped \u2014\npresent on every Foliar row, `Not Applicable` on every Soil/Chemigation row; `Only For Use in:\nIdaho, Oregon, and Washington` is crop-scoped to Clover alone.\n\n**Mistake logged (D11, Critical):** the app's document-wide fallback once stamped the Clover-only\nand Planthouse-only restrictions onto all 41 rows. **Copying a crop-specific restriction onto\nunrelated rows is fabrication \u2014 worse than an empty cell, because it reads as verified.** Getting\nthe scope wrong in the other direction (leaving a genuinely product-wide restriction as `NS`\nbecause no single crop section restates it) is just as wrong, only quieter.\n\n**Rule:** before writing `NS` in Geographic / Drift / Soil / On-field Non-target / Additional\nfor Use, first locate where the label states that restriction. If it's in a general section that\napplies to the whole product, propagate it to every row (gated by method-applicability, per the\ntable above) \u2014 do not wait for a crop-specific block to repeat it.\n\n---\n\n## R-15 \u00b7 A per-crop-season cap counts as a per-year cap when the label allows only one season\n\nR-9 keeps C.C. (crop cycle) and Yr (year) columns distinct. This rule closes the gap that\nopens when a label states a cap \"per crop season\" or \"per crop cycle\" but never spells out\n\"per year\" or \"per calendar year\" in so many words.\n\nUSH679SC200 (Soybean, Field Corn, Cereals, Canola and Pulse, Fruit Tree/Tree Nut/Other Crops):\nevery crop section states \"Maximum of 1 application per crop season\" and nothing else about\na yearly limit. Strict-silence reading leaves `Max # Apps/Yr.` and `Max No. of CC/yr` both `NS`.\nBut each of these crops \u2014 as grown under the label's own stated timing (a single burndown\napplication 30+ days before planting, once per crop) \u2014 has exactly one growing season per\ncalendar year. A regulatory analyst reading this label fills `Max # Apps/Yr.` = `1` and\n`Max No. of CC/yr` = `1`, because a cap of 1-per-season **is** a cap of 1-per-year when the\ncrop cannot have a second season in the same year.\n\n**Rule:** when a label caps applications per crop season/cycle and the crop named in that row\nis grown at most once per calendar year under the label's own stated timing (no second planting\nwindow, no double-crop language, no multi-season instructions anywhere in that section or\nproduct-wide), treat the per-season cap as the per-year cap: `Max # Apps/Yr.` = the per-season\nfigure, `Max No. of CC/yr` = the number of seasons stated (usually `1`). Leave both `NS` only\nwhen the label itself indicates the crop can be grown more than once a year (double-cropping,\n\"per crop cycle\" language paired with an explicit multiple-crop-cycle statement, or the label\nstates a separate, larger annual cap) and does not say how many cycles that adds up to.\n\nThis is a **derived convention**, not a verbatim quote \u2014 record it the way D1\u2013D3 derivations are\nrecorded, not as a plain extracted value, so a reviewer can see the reasoning (season = year for\nthis crop, per the label's own single planting/timing window) rather than mistaking it for a\nnumber the label stated outright.\n\n**Mistake avoided:** benchmarking USH679SC200 against a hand-built gold reference under strict\n`NS`-on-silence reading scored 42/50 (84%); adopting this convention for the 8 rows gated on it\nbrought the same table to 50/50 (100%) \u2014 the gold reference was built by an analyst applying\nexactly this season=year reasoning, not by re-reading the label for a number it never states.\n\n---\n\n## Pre-flight checklist\n\nBefore releasing a table:\n\n- [ ] Every rate traced to the label under review, at the cited page\n- [ ] No wording carried over from a golden example or another label (**R-5**)\n- [ ] Foliar and soil applications on separate rows (**R-1**)\n- [ ] Each AI's rate labelled with its abbreviation (**R-3**)\n- [ ] Conditional rates and PHIs kept whole (**R-4**, **R-12**)\n- [ ] Crop-group exceptions preserved (**R-11**)\n- [ ] Restrictions routed to the right column (**R-7**)\n- [ ] Restriction scope determined \u2014 product-wide restrictions propagated to every row, method-scoped restrictions gated `NA` on non-matching methods, crop-scoped restrictions confined to their own rows (**R-14**)\n- [ ] Per-crop-season caps checked against the crop's season count \u2014 treated as the per-year cap when the label shows only one season/year for that crop, left `NS` only when the label indicates more than one season is possible (**R-15**)\n- [ ] PPE, MRI, REI, App Rate all populated (**R-8**)\n- [ ] C.C. and Yr columns distinguished; cross-check applied (**R-9**)\n- [ ] AI-level annual caps captured (**R-10**)\n- [ ] `NS` vs `NA` used correctly; no blanks (**R-6**)\n";
+
+/** Verbatim copy of knowledge/derivation-rules.md — same manual-sync caveat as
+ *  EXTRACTION_RULES_MD above. */
+const DERIVATION_RULES_MD = "# Derivation Rules \u2014 analyst-derived columns\n\nThree UST columns are almost never printed on a label as a literal string, yet the golden\nexamples always have them filled:\n\n- **Use Site** \u2014 `Agricultural (Outdoor)`\n- **App. Type** \u2014 `Broadcast`, `Chemigation, Injection, In-furrow spray, Drench`, \u2026\n- **App. Timing (Site Status)** \u2014 `Post-emergence`, `At-planting / Post-transplant`, \u2026\n\nAn analyst fills these by reading the application prose and applying a settled convention.\nThat convention is written out here so the tool can apply it too \u2014 **reviewable and traceable,\nnot guessed**.\n\n## Why this does not break R19\n\nR19 says the tool must never invent facts. These rules do not invent anything: each one fires\nonly on **evidence found in the label text**, and each derived value is recorded so a reviewer\ncan see *which* phrase triggered it. A rule with no matching evidence does not fire, and the\ncolumn stays `NS`.\n\nThe distinction that matters:\n\n| Not allowed | Allowed |\n|---|---|\n| Assuming a PHI of 7 because similar products use 7 | Reading \"Broadcast\" from the phrase \"apply as a broadcast spray\" |\n| Filling `Use Site` because most labels are agricultural | Filling `Use Site` because the label says \"not for use in greenhouses\" |\n| Copying a rate from another product | Converting a stated rate with a stated concentration |\n\nEvery rule below cites the evidence it requires. No rule fires on absence of evidence alone,\nwith the single documented exception of D3 (see its note).\n\n---\n\n## D1 \u00b7 Use Site\n\n| # | Evidence in the label | Value |\n|---|---|---|\n| D1.1 | Section heading contains `PLANTHOUSE` | `Planthouse` |\n| D1.2 | Block names a greenhouse use (`in greenhouses`, `greenhouse-grown`) | `Greenhouse (Indoor)` |\n| D1.3 | Block names lawns, homes, ornamental beds around residences | `Residential (Outdoor)` |\n| D1.4 | Block states an outdoor field application \u2014 a per-acre rate (`fl oz/A`, `Gallons/Acre`), aerial application, or ground boom equipment | `Agricultural (Outdoor)` |\n\nD1.4 is evidence-based: a per-acre rate with aircraft or ground-boom equipment is an outdoor\nfield use. A label with none of these leaves `Use Site` as `NS`.\n\n## D2 \u00b7 App. Type\n\nDriven by `App. Target` plus the delivery words present in the block. Several may apply, and\nthe golden example lists them comma-separated in the label's own order.\n\n| # | App. Target | Evidence | Value contributed |\n|---|---|---|---|\n| D2.1 | Foliar | `broadcast`, or a foliar spray applied over the whole field by ground boom or aircraft | `Broadcast` |\n| D2.2 | Foliar | `banded`, `band application` | `Banded` |\n| D2.3 | Foliar | `directed spray` / `shielded spray` | `Directed Spray` / `Shielded Spray` |\n| D2.4 | Soil | `chemigation`, `drip`, `trickle`, `micro-sprinkler` | `Chemigation` |\n| D2.5 | Soil | `injection`, `inject below the seed line` | `Injection` |\n| D2.6 | Soil | `in-furrow` | `In-furrow spray` |\n| D2.7 | Soil | `drench`, `potting hole drench`, `post-transplant drench` | `Drench` |\n| D2.8 | Soil | `side-dress` | `Side-dress` |\n| D2.9 | Seed Treatment | any | `Seed Treatment` |\n\nIf none match, `App. Type` stays `NS`.\n\n## D3 \u00b7 App. Timing (Site Status)\n\n| # | Evidence | Value |\n|---|---|---|\n| D3.1 | `pre-emergence` and `post-emergence` both present | `Pre-emergence/ Post-emergence` |\n| D3.2 | `pre-emergence` / `pre-emergent` alone | `Pre-emergence` |\n| D3.3 | `post-emergence` / `post-emergent` alone | `Post-emergence` |\n| D3.4 | `at-planting`, `at planting`, `prior to planting` | `At-planting` |\n| D3.5 | `at transplant`, `post-transplant`, `potting hole` | `Post-transplant` |\n| D3.6 | D3.4 and D3.5 both present | `At-planting / Post-transplant` |\n| D3.8 | *withdrawn \u2014 see below* | \u2014 |\n| D3.7 | Foliar target, and no other timing evidence in the block | `Post-emergence` |\n| D3.9 | Soil placement wording implying a standing plant: `basal drench`, `drip line`, `tree canopy`, `trunk` | `Post-emergence` |\n\n**D3.8 was withdrawn.** It returned `Pre-transplant` from plant-house wording. The repository\ngolden supports that; the analyst's pasted golden records `Post-emergence` on the same rows. Two\nreference files disagree, so the rule had no evidence behind it \u2014 only a choice of source \u2014 and\nit is out of the code until the authoritative golden is settled (Task 46).\n\n**D3.10 \u2014 `App. Timing (other)` default.** Where neither the use block nor the label's\nproduct-wide directions state any timing phrase, the column is filled with `When pests occur`\nand marked derived. This is a **house convention, not a reading of the label.** It is applied\nlast, after block wording and after the product-wide sentence, and never overwrites a filled cell.\n\nIt is marked derived precisely because R19 would otherwise be broken: an unmarked cell claims to\nbe label text. Anyone reviewing the output must be able to tell a printed phrase from a default,\nso **if the derived marking is ever dropped from this rule, the rule must be dropped with it.**\n\nNote on the evidence for this rule. It was first written on the basis that the golden varies the\nwording per row, which made a default look risky. That was read from\n`golden_example_SIVANTO_400_SL.txt`. The analyst's pasted golden\n(`golden_example_SIVANTO_400_SL_analyst_paste.txt`) carries `When pests occur` on **every** row,\nwhich supports the default far more strongly. The two files disagree; the rule is defensible\nunder either, but the reasoning recorded for it should not be trusted until Task 46 resolves\nwhich file is authoritative.\n\n**Order matters within `deriveTimingStatus()`.** D3.1\u2013D3.3 read the explicit words first, the\nplanting/transplant pair next, then the situational rules D3.9 and D3.7 last, so a stated phrase\nalways beats an inference. When D3.8 was briefly present it had to be tested *before* D3.4\u2013D3.6,\nbecause a plant-house block narrates the whole sequence \u2014 apply \"prior to transplanting\", then a\nfield application \"following transplanting\" \u2014 and the generic transplant pattern matches it too.\nThat interaction is recorded here in case D3.8 is ever reinstated.\n\n**Note on D3.7 and D3.9.** These two reason from the situation rather than a phrase.\nA foliar spray onto a standing crop is by definition post-emergence; so is a soil treatment\nplaced at the base of a trunk or between the trunk and the drip line of a canopy, because\nneither is possible unless the crop is up. D3.7's evidence is that the label files the use\nunder a FOLIAR heading; D3.9's is the placement wording. Perennial-crop soil blocks (citrus,\nstone fruit, vine) never print the word \"post-emergence\", yet the golden records it for them.\n\nD3.7 formerly also required pest-driven wording in the block. That extra condition was not\nload-bearing, and it broke the column: SIVANTO states its pest timing once in the general\ndirections instead of repeating it per use, so the rule fired on 1 row of 43 while the golden\nrecords `Post-emergence` on every foliar row. Removed. All three are listed separately here so\na reviewer can disable them if the convention changes.\n\n---\n\n## Reviewing derived values\n\nEvery value these rules produce is logged in the run log under the row it belongs to, naming\nthe rule that fired. Anything a rule did not cover stays `NS`. If a derived value looks wrong,\nthe fix belongs in this file first, then in `deriveColumns()` in `app/index.html`.\n";
+
 const META_COLUMNS = ["Source File", "Page", "Confidence"];
 
 /** Columns shown in the on-screen table and written to exports. */
@@ -624,6 +656,61 @@ const aiSelect     = document.getElementById("aiSelect");
 const aiConfirmBtn = document.getElementById("aiConfirmBtn");
 let pendingRun = null;   // run parked awaiting the analyst's choice
 const logEl    = document.getElementById("log");
+
+// AI extraction — reads label prose and reasons through EXTRACTION_RULES_MD /
+// DERIVATION_RULES_MD via a direct call to the user's own Anthropic account,
+// instead of pattern-matching regex. Opt-in; the key never leaves the
+// browser except in the one fetch() call to api.anthropic.com.
+const LLM_API_KEY_STORAGE_KEY = "ust_anthropic_api_key";
+const llmExtractToggle  = document.getElementById("llmExtractToggle");
+const llmSettingsBtn    = document.getElementById("llmSettingsBtn");
+const llmSettingsPanel  = document.getElementById("llmSettingsPanel");
+const llmApiKeyInput    = document.getElementById("llmApiKeyInput");
+const llmApiKeySaveBtn  = document.getElementById("llmApiKeySaveBtn");
+const llmApiKeyClearBtn = document.getElementById("llmApiKeyClearBtn");
+const llmApiKeyStatus   = document.getElementById("llmApiKeyStatus");
+
+function getSavedLlmApiKey() {
+  return localStorage.getItem(LLM_API_KEY_STORAGE_KEY) || "";
+}
+
+function renderLlmApiKeyStatus() {
+  const key = getSavedLlmApiKey();
+  llmApiKeyStatus.textContent = key
+    ? `A key is saved (ending …${key.slice(-4)}).`
+    : "No key saved yet — AI extraction will prompt for one.";
+}
+
+// A saved key means the user has already opted in once, so AI extraction
+// becomes the default going forward; a fresh install with no key still runs
+// the free/offline regex path with no setup required.
+llmExtractToggle.checked = !!getSavedLlmApiKey();
+renderLlmApiKeyStatus();
+
+llmSettingsBtn.addEventListener("click", () => {
+  const opening = llmSettingsPanel.style.display === "none" || !llmSettingsPanel.style.display;
+  llmSettingsPanel.style.display = opening ? "flex" : "none";
+  if (opening) {
+    llmApiKeyInput.value = getSavedLlmApiKey();
+    llmApiKeyInput.focus();
+  }
+});
+
+llmApiKeySaveBtn.addEventListener("click", () => {
+  const key = llmApiKeyInput.value.trim();
+  if (!key) return;
+  localStorage.setItem(LLM_API_KEY_STORAGE_KEY, key);
+  llmExtractToggle.checked = true;
+  renderLlmApiKeyStatus();
+  llmSettingsPanel.style.display = "none";
+});
+
+llmApiKeyClearBtn.addEventListener("click", () => {
+  localStorage.removeItem(LLM_API_KEY_STORAGE_KEY);
+  llmApiKeyInput.value = "";
+  llmExtractToggle.checked = false;
+  renderLlmApiKeyStatus();
+});
 
 let files = [];
 
@@ -3616,18 +3703,155 @@ runBtn.addEventListener("click", async () => {
     return;                    // resumes in the Confirm handler
   }
 
-  finishRun(documents, totalPages, actives[0] ? actives[0].name : null);
+  await finishRun(documents, totalPages, actives[0] ? actives[0].name : null);
 });
 
+/** Reads a label's full text via a direct call to Anthropic's Messages API,
+ *  using the user's own API key, and reasons through EXTRACTION_RULES_MD /
+ *  DERIVATION_RULES_MD the same way the extraction-main-agent does — instead
+ *  of pattern-matching regex. Returns rows in the same shape parseDocument()
+ *  produces (built from blankRow(), scored via scoreRow()) so rendering and
+ *  export need no separate code path. Throws on any API/network failure —
+ *  callers must not silently fall back to regex. */
+async function extractWithLLM(doc, apiKey) {
+  const pageMarkedText = doc.pages
+    .map((text, i) => `--- PAGE ${i + 1} ---\n${text}`)
+    .join("\n\n");
+
+  const MAX_CHARS = 150000;
+  if (pageMarkedText.length > MAX_CHARS) {
+    logEl.textContent += `   ⚠ ${doc.fileName} is ${pageMarkedText.length.toLocaleString()} characters — `
+      + `above the ~${MAX_CHARS.toLocaleString()}-character single-call guideline; sending the full text anyway (no chunking in v1).\n`;
+  }
+
+  const rowProperties = {};
+  SCHEMA.forEach(col => { rowProperties[col] = { type: "string" }; });
+  rowProperties["Page"] = {
+    type: "string",
+    description: "1-based page number this row's use is found on, matching one of the --- PAGE N --- markers in the label text."
+  };
+  rowProperties["Evidence"] = {
+    type: "string",
+    description: "A short verbatim phrase copied from the label text, at the cited page, that supports this row (per R-5 — never paraphrased, never from another label)."
+  };
+
+  const tool = {
+    name: "emit_use_summary_rows",
+    description: "Emit one row per use + use site + application method found in the label, per the extraction and derivation rules provided.",
+    input_schema: {
+      type: "object",
+      properties: {
+        rows: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: rowProperties,
+            required: SCHEMA.concat(["Page"])
+          }
+        }
+      },
+      required: ["rows"]
+    }
+  };
+
+  const systemPrompt = [
+    "You are a regulatory extraction analyst building a Use Summary Table from a pesticide label PDF's text.",
+    "Read the label text end-to-end and apply the rules below exactly as written — they encode past mistakes and the analyst's own conventions. Never invent a value; every cell must trace to the label text you were given, at the page you cite.",
+    "",
+    "Every row must have exactly these columns. Never leave a cell blank: `NS` = the label is silent on this value, `NA` = the column does not apply to this use.",
+    JSON.stringify(SCHEMA),
+    "",
+    EXTRACTION_RULES_MD,
+    "",
+    DERIVATION_RULES_MD
+  ].join("\n");
+
+  const userPrompt = [
+    `Label file: ${doc.fileName}`,
+    `The label text below is split into pages marked "--- PAGE N ---". Cite the page each row's use is found on in the "Page" field, and a short verbatim supporting phrase in "Evidence".`,
+    "",
+    pageMarkedText
+  ].join("\n");
+
+  const MAX_TOKENS = 8192;
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-5",
+      max_tokens: MAX_TOKENS,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userPrompt }],
+      tools: [tool],
+      tool_choice: { type: "tool", name: "emit_use_summary_rows" }
+    })
+  });
+
+  if (!response.ok) {
+    let detail = "";
+    try { detail = (await response.json()).error?.message || ""; } catch (_) { /* body wasn't JSON */ }
+    throw new Error(`Anthropic API request failed (${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+
+  const data = await response.json();
+  if (data.stop_reason === "max_tokens") {
+    // The tool-use JSON may be cut off mid-row — surface this rather than
+    // silently presenting a possibly-truncated row set as complete.
+    logEl.textContent += `   ⚠ ${doc.fileName}: the model's response hit the ${MAX_TOKENS}-token output limit — some rows may be missing or the last row incomplete.\n`;
+  }
+  const toolUse = (data.content || []).find(b => b.type === "tool_use" && b.name === "emit_use_summary_rows");
+  if (!toolUse) throw new Error("Model response did not include the expected structured output.");
+
+  const rawRows = toolUse.input?.rows || [];
+  const rows = rawRows.map(raw => {
+    const row = blankRow();
+    SCHEMA.forEach(col => {
+      const v = raw[col];
+      if (v !== undefined && v !== null && String(v).trim() !== "") row[col] = String(v);
+    });
+    row["Page"] = raw["Page"] ? String(raw["Page"]) : NOT_SPECIFIED;
+    row["Source File"] = doc.fileName;
+    row.__source = raw["Evidence"] ? String(raw["Evidence"]) : "";
+    row.__derived = {};
+    row["Confidence"] = scoreRow(row);
+    return row;
+  });
+  rows.forEach((r, i) => { r.__id = `${doc.fileName}#${i}`; });
+  return rows;
+}
+
 /** Parse, render and report. Split out so the AI picker can resume it. */
-function finishRun(documents, totalPages, selectedAi) {
+async function finishRun(documents, totalPages, selectedAi) {
   aiPicker.style.display = "none";
   pendingRun = null;
 
-  // TASK 4 — parse every document into schema-compliant rows
+  // TASK 4 / AI extraction — parse every document into schema-compliant rows,
+  // either via the regex/heuristic engine or, when opted in, by having an
+  // LLM read the label and apply EXTRACTION_RULES_MD / DERIVATION_RULES_MD.
   statusEl.textContent = "Parsing uses and application methods…";
   allRows = [];
-  documents.forEach(doc => {
+
+  const useLLM = llmExtractToggle.checked;
+  const llmApiKey = getSavedLlmApiKey();
+  if (useLLM && !llmApiKey) {
+    llmSettingsPanel.style.display = "flex";
+    llmApiKeyInput.focus();
+    statusEl.textContent = "AI extraction needs an Anthropic API key.";
+    noticeTx.textContent = "AI extraction is enabled but no API key is saved yet. Add one in AI Settings, then click Run Extraction again.";
+    noticeIc.textContent = "⚠";
+    noticeEl.classList.add("error");
+    noticeEl.style.display = "flex";
+    barEl.style.display = "none";
+    runBtn.disabled = clearBtn.disabled = false;
+    return;
+  }
+
+  for (const doc of documents) {
     doc.selectedAi = selectedAi;
     // Clear the whole doc.__* cache group, not just the two that obviously
     // depend on the active ingredient — see the convention note above.
@@ -3636,17 +3860,42 @@ function finishRun(documents, totalPages, selectedAi) {
     doc.__ppe    = undefined;
     doc.__equip  = undefined;
     doc.__physicalForm = undefined;
-    const sections = findUseSections(doc.fullText);
-    const byDetector = sections.reduce((acc, s) => {
-      const k = s.detector || "unknown";
-      acc[k] = (acc[k] || 0) + 1;
-      return acc;
-    }, {});
 
-    const rows = parseDocument(doc);
+    let rows;
+    if (useLLM) {
+      statusEl.textContent = `Extracting ${doc.fileName} with Claude…`;
+      logEl.textContent += `\n→ ${doc.fileName}: extracting with AI (reads the full label and applies extraction-rules.md / derivation-rules.md)…\n`;
+      try {
+        rows = await extractWithLLM(doc, llmApiKey);
+        logEl.textContent += `   ${rows.length} use row(s) returned by the model\n`;
+      } catch (err) {
+        // Never silently fall back to regex — the user must know which path
+        // actually produced (or failed to produce) the rows on screen.
+        console.error(err);
+        logEl.textContent += `✖ ${doc.fileName}: AI extraction failed — ${err.message}\n`;
+        const fallback = blankRow();
+        fallback["Additional Information"] = `AI extraction failed: ${err.message}`;
+        fallback["Page"] = "1";
+        fallback["Confidence"] = "Low";
+        fallback["Source File"] = doc.fileName;
+        fallback.__source = "";
+        fallback.__derived = {};
+        fallback.__id = `${doc.fileName}#0`;
+        rows = [fallback];
+      }
+    } else {
+      const sections = findUseSections(doc.fullText);
+      const byDetector = sections.reduce((acc, s) => {
+        const k = s.detector || "unknown";
+        acc[k] = (acc[k] || 0) + 1;
+        return acc;
+      }, {});
+      rows = parseDocument(doc);
+      logEl.textContent += `\n→ ${doc.fileName}: ${rows.length} use row(s) parsed\n`;
+      logEl.textContent += `   section detectors: ${Object.entries(byDetector).map(([k, n]) => `${k}=${n}`).join(", ") || "none"}\n`;
+    }
+
     allRows.push(...rows);
-    logEl.textContent += `\n→ ${doc.fileName}: ${rows.length} use row(s) parsed\n`;
-    logEl.textContent += `   section detectors: ${Object.entries(byDetector).map(([k, n]) => `${k}=${n}`).join(", ") || "none"}\n`;
     if (selectedAi) {
       logEl.textContent += `   active ingredient: ${selectedAi}\n`;
     }
@@ -3664,7 +3913,7 @@ function finishRun(documents, totalPages, selectedAi) {
       }
     });
     console.table(rows);
-  });
+  }
 
   window.__useSummaryRows = allRows;
 
@@ -3715,10 +3964,10 @@ function finishRun(documents, totalPages, selectedAi) {
 }
 
 // R19 — resume the run once the analyst has named the active ingredient.
-aiConfirmBtn.addEventListener("click", () => {
+aiConfirmBtn.addEventListener("click", async () => {
   if (!pendingRun) return;
   barEl.style.display = "block";
-  finishRun(pendingRun.documents, pendingRun.totalPages, aiSelect.value);
+  await finishRun(pendingRun.documents, pendingRun.totalPages, aiSelect.value);
 });
 </script>
 </body>
