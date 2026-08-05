@@ -3669,8 +3669,47 @@ async function extractWithLLM(doc) {
       + `above the ~${MAX_CHARS.toLocaleString()}-character single-call guideline; sending the full text anyway (no chunking in v1).\n`;
   }
 
+  // Per-column definitions from knowledge/UST_definitions.txt — the schema's
+  // authoritative source. Without these the model only sees the bare column
+  // name and has to guess its meaning: "Use" was guessed as the herbicide's
+  // mode of action ("Herbicide - Weed Control (Burndown)") instead of the
+  // crop/site name UST_definitions.txt actually specifies, since nothing
+  // told the model otherwise.
+  const COLUMN_DEFINITIONS = {
+    "Reg. #/File Sym": "EPA Registration Number (or File Symbol if pending registration).",
+    "Physical Form": "Type of formulation — WP, SC, Granular, WDG, etc.",
+    "Product Name (PBN)": "Primary Brand Name.",
+    "Use": "The crop, crop group, turf, plantscape, seed treatment, etc. this row applies to — e.g. \"SOYBEAN\", \"CITRUS FRUITS (CROP GROUP 10-10)\", \"Turf\". This is a crop/site name, NOT a description of what the product does (do not write things like \"Herbicide - Weed Control\" here — that belongs in App. Target / Additional Information).",
+    "Use Site": "Agricultural (Outdoor), Greenhouse (Indoor), Residential (Outdoor), etc.",
+    "App. Target": "foliar, soil, seed treatment.",
+    "App. Type": "broadcast, banded, soil drench, etc.",
+    "App. Equipment": "aerial, ground boom, boomless ground, handheld, etc.",
+    "App. Timing (Site Status)": "pre- or post-(crop) emergent, at-planting, post-transplant, etc.",
+    "App. Timing (other)": "specific timing when it's dependent on pest pressure or otherwise not tied to crop emergence, e.g. \"when pests occur\".",
+    "App Rate (lb ai/A)": "the actual applied rate, in lb a.i./A — distinct from Max Single Rate.",
+    "A.I. Max Single Rate/App. (lb a.i./A)": "maximum single rate of active ingredient for this use/use site.",
+    "Max # Apps/C.C.": "maximum number of applications per crop cycle.",
+    "A.I. Max Total Rate/C.C. (lb a.i./A)": "maximum total rate of active ingredient per crop cycle.",
+    "Max # Apps/Yr.": "maximum number of applications within a 12-month period.",
+    "A.I. Max Total Rate/Yr. (lb a.i./A)": "maximum total rate of active ingredient within a 12-month period.",
+    "MRI (days)": "minimum retreatment interval, in days.",
+    "REI": "restricted entry interval, in hours (not days — do not confuse with PHI).",
+    "PHI (days)": "preharvest interval, in days (not hours — do not confuse with REI).",
+    "PPE": "personal protective equipment required, copied verbatim from the label's PPE section.",
+    "Additional Information": "info relevant to rates not captured in previous columns, plus AI-level annual caps and other required capture that has no other column.",
+    "Max No. of CC/yr": "maximum number of crop cycles per 12-month period.",
+    "Geographic Restrictions": "e.g. \"Not registered for use in XX\"; \"product only used in lower 48 (CONUS)\"; etc.",
+    "Drift Restrictions": "wind speed, boom height, droplet size, buffer distances.",
+    "Soil Restrictions": "incorporate into soil, leave on soil surface, minimum incorporation depth, etc.",
+    "On-field Non-target Species Restrictions": "typically pollinator protections but other non-target species may apply.",
+    "Additional Restrictions for Use/Use Site": "tank-mix prohibitions, adjuvant prohibitions, grazing limits, etc."
+  };
+
   const rowProperties = {};
-  SCHEMA.forEach(col => { rowProperties[col] = { type: "string" }; });
+  SCHEMA.forEach(col => {
+    rowProperties[col] = { type: "string" };
+    if (COLUMN_DEFINITIONS[col]) rowProperties[col].description = COLUMN_DEFINITIONS[col];
+  });
   rowProperties["Page"] = {
     type: "string",
     description: "1-based page number this row's use is found on, matching one of the --- PAGE N --- markers in the label text."
