@@ -429,15 +429,15 @@
     <!-- LLM extraction — reads label prose and reasons through the same
          extraction/derivation rules the Copilot extraction agent uses,
          instead of pattern-matching regex. Opt-in; requires the user's own
-         Anthropic API key, stored only in this browser. -->
+         personal myGenAssist (mGA) token, stored only in this browser. -->
     <div class="notice" id="llmSettingsPanel" role="group" aria-label="AI extraction settings" style="display:none;align-items:flex-start;flex-direction:column;gap:8px">
       <strong>AI Extraction Settings</strong>
-      <span class="sub">Your API key is stored only in this browser (localStorage) and sent directly to Anthropic's API — never sent anywhere else, never committed.</span>
+      <span class="sub">Uses Bayer's myGenAssist (mGA) gateway. Get your own personal token from myGenAssist → Settings → Token Management → Create token. It's stored only in this browser (localStorage), sent only to chat.int.bayer.com, never sent anywhere else and never committed — it's billed to your own mGA budget, so don't share it with anyone else.</span>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%">
-        <label for="llmApiKeyInput">Anthropic API key:</label>
-        <input type="password" id="llmApiKeyInput" placeholder="sk-ant-..." autocomplete="off" style="flex:1;min-width:220px" />
-        <button class="primary" type="button" id="llmApiKeySaveBtn">Save key</button>
-        <button class="ghost" type="button" id="llmApiKeyClearBtn">Clear key</button>
+        <label for="llmApiKeyInput">myGenAssist token:</label>
+        <input type="password" id="llmApiKeyInput" placeholder="mga-..." autocomplete="off" style="flex:1;min-width:220px" />
+        <button class="primary" type="button" id="llmApiKeySaveBtn">Save token</button>
+        <button class="ghost" type="button" id="llmApiKeyClearBtn">Clear token</button>
       </div>
       <span class="sub" id="llmApiKeyStatus"></span>
     </div>
@@ -658,10 +658,11 @@ let pendingRun = null;   // run parked awaiting the analyst's choice
 const logEl    = document.getElementById("log");
 
 // AI extraction — reads label prose and reasons through EXTRACTION_RULES_MD /
-// DERIVATION_RULES_MD via a direct call to the user's own Anthropic account,
-// instead of pattern-matching regex. Opt-in; the key never leaves the
-// browser except in the one fetch() call to api.anthropic.com.
-const LLM_API_KEY_STORAGE_KEY = "ust_anthropic_api_key";
+// DERIVATION_RULES_MD via a direct call to Bayer's myGenAssist (mGA) gateway
+// using the user's own personal mGA token, instead of pattern-matching
+// regex. Opt-in; the token never leaves the browser except in the one
+// fetch() call to chat.int.bayer.com.
+const LLM_API_KEY_STORAGE_KEY = "ust_mga_token";
 const llmExtractToggle  = document.getElementById("llmExtractToggle");
 const llmSettingsBtn    = document.getElementById("llmSettingsBtn");
 const llmSettingsPanel  = document.getElementById("llmSettingsPanel");
@@ -3706,13 +3707,15 @@ runBtn.addEventListener("click", async () => {
   await finishRun(documents, totalPages, actives[0] ? actives[0].name : null);
 });
 
-/** Reads a label's full text via a direct call to Anthropic's Messages API,
- *  using the user's own API key, and reasons through EXTRACTION_RULES_MD /
- *  DERIVATION_RULES_MD the same way the extraction-main-agent does — instead
- *  of pattern-matching regex. Returns rows in the same shape parseDocument()
- *  produces (built from blankRow(), scored via scoreRow()) so rendering and
- *  export need no separate code path. Throws on any API/network failure —
- *  callers must not silently fall back to regex. */
+/** Reads a label's full text via a direct call to Bayer's myGenAssist (mGA)
+ *  gateway — an Anthropic-Messages-API-compatible proxy at
+ *  chat.int.bayer.com — using the user's own personal mGA token, and reasons
+ *  through EXTRACTION_RULES_MD / DERIVATION_RULES_MD the same way the
+ *  extraction-main-agent does, instead of pattern-matching regex. Returns
+ *  rows in the same shape parseDocument() produces (built from blankRow(),
+ *  scored via scoreRow()) so rendering and export need no separate code
+ *  path. Throws on any API/network failure — callers must not silently fall
+ *  back to regex. */
 async function extractWithLLM(doc, apiKey) {
   const pageMarkedText = doc.pages
     .map((text, i) => `--- PAGE ${i + 1} ---\n${text}`)
@@ -3773,17 +3776,20 @@ async function extractWithLLM(doc, apiKey) {
     pageMarkedText
   ].join("\n");
 
+  const MGA_ENDPOINT = "https://chat.int.bayer.com/anthropic/v1/messages";
   const MAX_TOKENS = 8192;
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch(MGA_ENDPOINT, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true"
+      // mGA is reached with a bearer token, not Anthropic's native x-api-key
+      // header — confirmed against how Claude Code itself authenticates to
+      // this same gateway (ANTHROPIC_AUTH_TOKEN -> Authorization: Bearer).
+      "authorization": `Bearer ${apiKey}`,
+      "anthropic-version": "2023-06-01"
     },
     body: JSON.stringify({
-      model: "claude-sonnet-5",
+      model: "claude-sonnet-4.6",
       max_tokens: MAX_TOKENS,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
@@ -3795,7 +3801,7 @@ async function extractWithLLM(doc, apiKey) {
   if (!response.ok) {
     let detail = "";
     try { detail = (await response.json()).error?.message || ""; } catch (_) { /* body wasn't JSON */ }
-    throw new Error(`Anthropic API request failed (${response.status})${detail ? `: ${detail}` : ""}`);
+    throw new Error(`mGA request failed (${response.status})${detail ? `: ${detail}` : ""}`);
   }
 
   const data = await response.json();
@@ -3841,8 +3847,8 @@ async function finishRun(documents, totalPages, selectedAi) {
   if (useLLM && !llmApiKey) {
     llmSettingsPanel.style.display = "flex";
     llmApiKeyInput.focus();
-    statusEl.textContent = "AI extraction needs an Anthropic API key.";
-    noticeTx.textContent = "AI extraction is enabled but no API key is saved yet. Add one in AI Settings, then click Run Extraction again.";
+    statusEl.textContent = "AI extraction needs a myGenAssist (mGA) token.";
+    noticeTx.textContent = "AI extraction is enabled but no mGA token is saved yet. Add one in AI Settings, then click Run Extraction again.";
     noticeIc.textContent = "⚠";
     noticeEl.classList.add("error");
     noticeEl.style.display = "flex";
