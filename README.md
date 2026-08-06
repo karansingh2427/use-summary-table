@@ -142,6 +142,11 @@ label and apply `knowledge/extraction-rules.md` / `derivation-rules.md` directly
 of pattern-matching regex. This generalizes to label layouts the regex heuristics don't
 cover, at the cost of needing network access and a few seconds of latency per label.
 
+**⚠️ If MGA credits are exhausted:** Uncheck the toggle to use the regex/heuristic engine
+(82% field-level precision, instant, offline). Alternatively, use the **`@extraction-main-agent`**
+in GitHub Copilot Chat, which runs on your Copilot subscription rather than Bayer's MGA gateway
+— see [ALTERNATIVES.md](ALTERNATIVES.md) for details.
+
 **This is a small pilot, not a production rollout.** The Function forwards to Bayer's
 internal myGenAssist (mGA) gateway using one shared mGA token supplied by a single
 colleague, stored only as an encrypted Cloudflare Pages environment variable — never in
@@ -151,8 +156,7 @@ the wider team needs the DSE-app route instead (a real service-account credentia
 ITLM governance review at `go/beat`, and an Agent Hub listing) — a separate, larger
 undertaking.
 
-Untick the toggle to fall back to the instant, offline, zero-network regex path described
-above at any time.
+**See [DEPLOYMENT.md](DEPLOYMENT.md) for full Cloudflare Pages setup instructions.**
 
 ## Output schema
 
@@ -196,6 +200,21 @@ tests/manual-checklist.md       66 hand-run tests covering current regression sc
 samples/README.md               Test-label set, sources, and accuracy checklist
 samples/expected/*.csv          Hand-checked expected output for verification
 ```
+
+## Maintaining knowledge files
+
+The app embeds knowledge files (`extraction-rules.md`, `derivation-rules.md`, etc.) as
+JavaScript constants so it can pass them to the LLM without needing a backend. After editing
+any file in `knowledge/`, sync them into the app:
+
+```bash
+python3 scripts/sync-knowledge.py
+```
+
+Then commit the updated `app/index.html` and deploy. This is required because there's no
+build step — the app runs directly from the HTML file.
+
+**See [DEPLOYMENT.md](DEPLOYMENT.md) for Cloudflare Pages deployment instructions.**
 
 ## Testing
 

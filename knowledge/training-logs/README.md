@@ -16,7 +16,7 @@ always be traced back to the PDF it came from.
 
 | File | Label | Entries | Last updated |
 |---|---|---|---|
-| _(none yet)_ | | | |
+| `indaziflam_200sc_training_log.txt` | Indaziflam 200 SC Herbicide (264-1106) | 11 | 2026-08-07 |
 
 ## Entry format
 

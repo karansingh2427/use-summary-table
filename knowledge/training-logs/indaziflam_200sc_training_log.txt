@@ -1,0 +1,144 @@
+# Training Log — Indaziflam 200 SC Herbicide
+# Label: 264-1106_Indaziflam 200 SC Herbicide_5_19_2025_BASE.pdf (31 pages)
+# Extraction date: 2026-08-07
+# Compared against: hand-built Excel (Indaziflam_200SC_indaziflam_use_summary.xlsx)
+# Comparison method: cell-by-cell computation + adjudication against source PDF
+
+=== 2026-08-07 · All crop groups · pp. 20-21 ===
+MISTAKE:  Extraction produced 22 rows, missing all 11 rows covering replanted/reset
+          crops. The section "APPLICATION DIRECTIONS FOR REPLANTED LABELED CROPS" on
+          pages 20-21 was not identified and never extracted.
+CAUSE:    Agent stopped after extracting per-crop sections in the main table of
+          contents. Pages 20-21 appear after the main crop list and are headed
+          "Replanted" — the agent did not re-scan for additional application-direction
+          sections after the main section loop.
+CORRECT:  11 separate rows for: Blueberry Highbush, Caneberry 13-07A, Coffee,
+          Grapes 13-07F, Hops, Pome Fruit 11-10, Stone Fruit 12-12, Tree Nuts 14-12
+          (except Pecan), Tree Nuts 14-12 (Pecan), Tropical Edible Peel 23, Tropical
+          Inedible Peel 24. Each has timing "anytime following planting provided soil is
+          completely settled around established and newly planted trees/vines."
+RULE:     After extracting all named-crop sections, scan the full label for any section
+          headed "replant", "reset", "at-planting", or "newly-planted". These define
+          separate use patterns and require their own rows. → R-17
+SEVERITY: High
+
+=== 2026-08-07 · Blueberry Highbush / Caneberry · App. Type · p. 11 ===
+MISTAKE:  App. Type recorded as "Broadcast" for both Blueberry Highbush and Caneberry.
+CAUSE:    Agent defaulted to "Broadcast" without reading the actual application sentence.
+CORRECT:  Page 11: "Apply Indaziflam 200SC Herbicide as a directed application to the
+          soil beneath the bushes." App. Type = "Directed".
+RULE:     App. Type must be read from the label's physical-application sentence. Never
+          default to "Broadcast". → R-20
+SEVERITY: Medium
+
+=== 2026-08-07 · Hops · App. Type · p. 16 ===
+MISTAKE:  App. Type recorded as "Broadcast".
+CAUSE:    Same as Blueberry — defaulted without reading.
+CORRECT:  Page 16: "Apply as minimum 2-foot band to each side of hop row."
+          App. Type = "Band".
+RULE:     → R-20
+SEVERITY: Medium
+
+=== 2026-08-07 · Christmas Trees / Conifer Plantations · App. Type · p. 29 ===
+MISTAKE:  App. Type recorded as "Broadcast".
+CAUSE:    Same default error.
+CORRECT:  Page 29: "Apply 2.8 to 5.8 fl oz/A as directed spray to soil surrounding
+          established plants." App. Type = "Directed".
+RULE:     → R-20
+SEVERITY: Medium
+
+=== 2026-08-07 · Blueberry Highbush · App. Timing · p. 11 ===
+MISTAKE:  App. Timing recorded as "Pre-emergence".
+CAUSE:    Agent extracted the UST schema term but dropped the dormancy qualifier.
+CORRECT:  Page 11: "Only apply to soil as dormant application in late fall through early
+          spring before bud swell." App. Timing = "Dormant / Pre-emergence (late fall
+          through early spring, before bud swell)".
+RULE:     App. Timing must preserve all qualifiers — dormancy window, growth stage,
+          seasonal window. Do not reduce to the schema term alone. → R-19
+SEVERITY: Medium
+
+=== 2026-08-07 · All 22 rows · A.I. Max Single Rate · pp. 10-29 ===
+MISTAKE:  Max Single Rate copied rate range rather than resolving to ceiling.
+          E.g. Blueberry Highbush: "0.045 (<1% OM); 0.065 (≥1% OM)" in both
+          App Rate and Max Single Rate. Correct Max Single Rate = 0.065.
+CAUSE:    Agent did not distinguish App Rate (stated range) from Max Single Rate
+          (ceiling of range). Only 4 of 22 rows resolved correctly.
+CORRECT:  Max Single Rate = upper bound of the range, as a single number. For
+          multi-bracket OM rates, the overall ceiling across all brackets.
+RULE:     Max Single Rate is the ceiling of the stated range, never the range itself.
+          → R-18
+SEVERITY: Medium
+
+=== 2026-08-07 · Grasses Grown for Seed · pp. 22-23 ===
+MISTAKE:  3 distinct geographic use patterns collapsed to 2 rows; western Oregon
+          carbon-seeded pattern omitted entirely.
+CAUSE:    Agent read the grass section as one use and split only on the Timothy/other
+          distinction. Did not identify sub-section headers for high vs. low rainfall areas.
+CORRECT:  Three rows:
+          1. High-rainfall western Oregon, carbon-seeded: 1.0 fl oz/A, 1 app/yr
+          2. High-rainfall western Oregon, established: 1.0–2.0 fl oz/A
+          3. Low-rainfall eastern OR/WA/ID: 2.0–3.0 fl oz/A (Timothy: 2.0 fl oz/A)
+RULE:     Headed sub-sections within a crop's directions that differ in rate or
+          geographic scope generate separate rows. → R-21
+SEVERITY: High
+
+=== 2026-08-07 · Grapes 13-07F · Max Total Rate/Yr · p. 15 ===
+MISTAKE:  Max Total Rate/Yr recorded as "0.065 (<1% OM); 0.13 (≥1% OM)".
+          This doubles the label's stated annual cap for ≥1% OM soils.
+CAUSE:    Agent applied R-4 OM-split logic incorrectly. The label gives one rate
+          for both OM bands for grapes: max 5.0 fl oz/A (0.065 lb ai/A) per year,
+          regardless of OM. No ≥1% OM variant exists on this label.
+CORRECT:  Page 15: "Do not apply more than a total of 5.0 fl oz product/A per year."
+          Max Total Rate/Yr = 0.065 (single value, no OM split).
+RULE:     Do not apply OM-split logic unless the label explicitly states different caps
+          per OM bracket. Check each crop's own rate table — do not infer an OM split
+          from other crops in the same label. → R-4
+SEVERITY: Critical (overstates permitted rate)
+
+=== 2026-08-07 · Sugarcane · Max Total Rate/Yr · p. 21 ===
+MISTAKE:  Max Total Rate/Yr recorded as 0.049 (computed conversion from 3.75 fl oz/A).
+CAUSE:    Agent computed 3.75 fl oz/A × (1.67 lb ai/gal ÷ 128) = 0.0489 and used that
+          value instead of the label's explicit lb ai/A statement.
+CORRECT:  Page 21: "Do not apply more than 4.0 fl oz/A (0.05 lb ai/A) per year."
+          Max Total Rate/Yr = 0.05 (the label's stated value, not the conversion).
+RULE:     When the label explicitly states a lb ai/A value alongside a product-unit cap,
+          use the label's lb ai/A figure. Do not substitute a freshly computed conversion.
+          → R-22
+SEVERITY: Medium
+
+=== 2026-08-07 · Coffee · Max Single Rate (2nd application) · p. 14 ===
+MISTAKE:  Second-application max rate was read from the max-per-year column instead of
+          the second-application column. Extraction reported 3.5/8.5/10.3 fl oz for the
+          second application across OM brackets.
+CAUSE:    Agent misread the label's dose chart — confused the "Max Per Year" column with
+          the "Max 2nd Application" column. These are adjacent in the label's rate table.
+CORRECT:  Page 14: Max 2nd application = 3.5 fl oz/A for all OM bands. Max per year
+          varies by OM: 7.0 / 8.5 / 10.3 fl oz/A.
+RULE:     When a label's dose chart has both a "Max 2nd Application" column and a "Max
+          Per Year" column, read them independently. The 2nd application ceiling is not
+          the same as the annual ceiling. → R-18 (ceiling resolution)
+SEVERITY: High
+
+=== 2026-08-07 · Blueberry Highbush · Max # Apps/Yr · p. 11 ===
+MISTAKE:  Max # Apps/Yr recorded as "2" (same for all states).
+CAUSE:    Agent read the general 2-application allowance but missed the California
+          exception stated two lines below.
+CORRECT:  Page 11: "DO NOT apply more than one application of Indaziflam 200SC Herbicide
+          per cropping season per year in California." Max # Apps/Yr should carry the
+          conditional: "1 (California); 2 (all other states)".
+RULE:     State-specific restrictions on max applications are binding regulatory caps and
+          must be captured in the same cell as the general cap, not silently omitted. Scan
+          the full USE RESTRICTIONS block for any geographic qualifiers on numeric limits.
+          → R-14 (restriction scope)
+SEVERITY: Critical
+
+=== 2026-08-07 · Blueberry Lowbush · PHI · p. 12 ===
+MISTAKE:  (Reference only — this was NOT made in Extraction A; it was made in
+          Extraction B). PHI recorded as 14 days. The label's section-level PHI table
+          on page 5 gives 14 days as the general crop PHI; the Lowbush-specific USE
+          RESTRICTIONS on page 12 override this with a 90-day harvest interval.
+CORRECT:  Page 12: "DO NOT apply within 90 days of harvest." PHI = 90 days.
+RULE:     A crop-section USE RESTRICTIONS block overrides the general PHI table when
+          it states a longer pre-harvest interval for that specific crop. Always read the
+          crop's own restrictions block in addition to the label-wide PHI table. → R-12
+SEVERITY: Critical (if made — wrong PHI could cause non-compliant harvest)

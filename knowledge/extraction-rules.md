@@ -292,6 +292,151 @@ duplicate and must be collapsed to one row.
 
 ---
 
+## R-17 · REPLANT / RESET sections are separate uses — read the whole label
+
+Indaziflam 200 SC dedicate pages 20-21 to an explicit section headed **"APPLICATION
+DIRECTIONS FOR REPLANTED LABELED CROPS"** covering 11 crop groups. The section describes a
+distinct timing pattern ("anytime following planting provided the following conditions exist")
+that differs materially from the established-crop directions. An extraction that stops at the
+main per-crop sections misses these rows entirely.
+
+**Rule:** after extracting all named-crop sections, scan the full label for any
+*replant*, *reset*, *at-planting*, or *newly-planted* application section. These sections
+define a separate use pattern and generate their own rows — one per crop group × application
+method, exactly as any other section would. Do not skip them because they reference crops
+already extracted from the main section. A replanted Pome Fruit row and an established Pome
+Fruit row are different uses.
+
+**Mistake logged:** the first Indaziflam extraction produced 22 rows, missing all 11 replant
+rows that appear on pages 20-21 of the label.
+
+---
+
+## R-18 · Max Single Rate is the ceiling of the stated range, not the range itself
+
+The **App Rate** column carries the stated rate or range as printed on the label. The **A.I.
+Max Single Rate/App.** column carries the *maximum* a single application may reach — which,
+for a range, is the upper bound.
+
+Indaziflam Blueberry Highbush (page 10): stated rate `0.045–0.065` lb ai/A. Max Single Rate
+= `0.065`. The extraction error was copying the full range `0.045–0.065` into Max Single Rate
+as well, which leaves the column non-informative.
+
+**Rule:** `A.I. Max Single Rate/App.` = the upper bound of the stated rate range. If the
+label states a flat rate (not a range), Max Single Rate equals that rate. If the label states
+multiple OM or regional brackets, Max Single Rate = the highest ceiling across all brackets,
+stated as a single number (e.g. `0.085` when brackets are `0.045–0.065` and `0.065–0.085`).
+Only use a range in Max Single Rate when the label itself states different rate ceilings for
+different conditions *and* those conditions will not be known at modeling time.
+
+**Mistake logged:** Indaziflam extraction copied App Rate range into Max Single Rate for 17
+of 22 rows; only 4 rows resolved to the ceiling correctly.
+
+---
+
+## R-19 · App. Timing must preserve dormancy state and growth-stage qualifiers
+
+"Pre-emergence" is not sufficient when the label conditions the timing on dormancy or a
+specific growth stage. Dropping those qualifiers makes a timed restriction look unconditional
+and can mislead application decisions.
+
+Indaziflam Blueberry Highbush (page 11): *"Only apply to soil as dormant application in late
+fall through early spring before bud swell."* The correct App. Timing is
+`Dormant / Pre-emergence (late fall through early spring, before bud swell)` — not just
+`Pre-emergence`.
+
+Other examples:
+- `Pre-emergence / Layby` (sugarcane: at layby cultivation, before canopy closure)
+- `Dormant post-harvest` (lowbush blueberry: after harvest and pruning, spring frost-free)
+- `Dormant or pre-bloom` (hops: early spring shoots ≤ 2 inches height)
+
+**Rule:** read the full timing sentence in the label and carry every qualifier that the label
+states — dormancy window, growth stage, seasonal window, sequence relative to another
+operation (cultivation, harvest, pruning). Do not reduce to the UST schema term alone.
+
+**Mistake logged:** Indaziflam extraction stripped dormancy qualifiers from 7 rows,
+flattening all to `Pre-emergence`.
+
+---
+
+## R-20 · App. Type must match the exact label wording — never default to "Broadcast"
+
+The **App. Type** column must reflect what the label says, not what "most labels do."
+
+| Label says | App. Type value |
+|---|---|
+| *"apply as a directed application to the soil beneath the bushes"* | `Directed` |
+| *"apply as a 2-foot band to each side of the hop row"* | `Band` |
+| *"broadcast treatment or as a banded treatment"* | `Broadcast or Band` |
+| *"broadcast, directed, or spot spray"* | `Broadcast, Directed, or Spot Spray` |
+| *"broadcast application"* | `Broadcast` |
+
+Indaziflam Blueberry Highbush (page 11), Caneberry (page 11), Hops (page 16), Christmas
+Trees (page 29), Conifer Plantations (page 29) all state *directed* or *band* application.
+Writing `Broadcast` for these is factually wrong: applying a soil herbicide broadcast where
+the label says directed risks contact with crop roots, foliage, or irrigation channels.
+
+**Rule:** find the sentence in the label that describes how the product is physically applied
+to the soil or plant surface. Use its exact wording to fill App. Type. If the label offers a
+choice (broadcast *or* band), carry both. Never default to `Broadcast` without label evidence.
+
+**Mistake logged:** Indaziflam extraction wrote `Broadcast` for all 22 rows; at least 5 crops
+(Highbush, Caneberry, Hops, Christmas Trees, Conifers) require `Directed` or `Band`.
+
+---
+
+## R-21 · Geographic sub-sections within one crop generate separate rows when rates differ
+
+Some labels divide a single crop's directions into sub-sections by geography or rainfall zone,
+each with different rates, maximum applications, or restrictions. These sub-sections are
+distinct uses and require separate rows, for the same reason R-1 splits foliar from soil.
+
+Indaziflam Grasses Grown for Seed (pages 22-23):
+- **High-rainfall western Oregon** (carbon-seeded): 1.0 fl oz/A, 1 application, specific
+  timing requirements
+- **High-rainfall western Oregon** (established): 1.0–2.0 fl oz/A, different restrictions
+- **Low-rainfall eastern OR/WA/ID**: 2.0–3.0 fl oz/A, distinct crop list, different
+  annual cap
+
+These are three distinct uses because the **rates differ materially** and the **geographic
+scope is mutually exclusive**. Collapsing them into one or two rows misstates the rates for
+at least one geography.
+
+**Rule:** when a label section has headed sub-sections that differ in rate, maximum
+applications, or restrictions (including geographic restriction), each sub-section is a
+separate row. The crop name in the **Use** column should identify the sub-section:
+e.g. `GRASSES GROWN FOR SEED — WESTERN OREGON (HIGH RAINFALL, ESTABLISHED)`.
+
+**Mistake logged:** Indaziflam extraction collapsed 3 distinct grass use patterns into 2
+rows, with one pattern (western Oregon carbon-seeded) omitted entirely.
+
+---
+
+## R-22 · Use label's stated numeric values; do not substitute unrounded conversions
+
+When the label states a rate in product units (fl oz/A) and a separate lb ai/A value for the
+same restriction, use the label's stated lb ai/A value — not a freshly computed conversion.
+
+Indaziflam Sugarcane (page 21): *"Do not apply more than 4.0 fl oz/A (0.05 lb ai/A) per year."*
+The conversion of 4.0 fl oz/A using the label's stated 1.67 lb ai/gal concentration yields
+0.0489 lb ai/A. The label nonetheless prints **0.05**. Use 0.05.
+
+**Why this matters:** the label states both the product-unit cap and the lb ai/A equivalent
+as binding regulatory values. A model using 0.049 rather than 0.05 understates the permitted
+annual rate and will disagree with every other regulatory document that cites the label
+directly.
+
+**Rule:** when the label explicitly states a lb ai/A value alongside a product-unit value for
+the same rate or limit, use the label's lb ai/A figure. Do not re-derive it from the
+concentration. If the label omits the lb ai/A equivalent, compute it from the conversion table
+(`knowledge/unit-conversions.md`) and document the computation in Additional Information.
+
+**Mistake logged:** Indaziflam extraction used 0.049 for sugarcane Max Total Rate/Yr instead
+of the label's stated 0.05. Extraction B's Calculation_Notes sheet explicitly records keeping
+the label's value rather than the computed one.
+
+---
+
 ## Pre-flight checklist
 
 Before releasing a table:

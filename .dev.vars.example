@@ -1,0 +1,5 @@
+# Local development environment variables for Cloudflare Pages
+# Copy this to .dev.vars (never commit .dev.vars itself)
+
+MGA_TOKEN=your-mga-token-here
+PILOT_GATE_SECRET=ust-pilot-2026
