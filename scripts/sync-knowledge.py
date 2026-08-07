@@ -53,7 +53,11 @@ for name, content in replacements:
     
     if pattern.search(app_html):
         old_html = app_html
-        app_html = pattern.sub(new_declaration, app_html)
+        # Use a lambda, not the string directly — re.sub() template-processes a string
+        # replacement (turning \n, \t, \r into literal control characters and treating
+        # \g<...>/\1 as backreferences), which corrupts the JS-escaped \n sequences we
+        # just built. A lambda return value is inserted verbatim, unprocessed.
+        app_html = pattern.sub(lambda m: new_declaration, app_html)
         
         if old_html != app_html:
             print(f'✓ Updated {name} ({len(content)} chars)')

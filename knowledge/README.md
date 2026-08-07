@@ -1,8 +1,14 @@
 # Knowledge & Reference Sources
 
 Reference material that agents and reviewers consult when building or checking a Use
-Summary Table. **Nothing in this folder is loaded by the app at runtime** — `app/index.html`
-never reads these files. They exist to guide judgement, not to drive code.
+Summary Table. The regex/heuristic engine in `app/index.html` never reads these files —
+lessons here only reach it when someone manually ports them into a regex pattern. The AI
+extraction path (`extractWithLLM()`) does read this folder: `extraction-rules.md`,
+`derivation-rules.md`, `schema-reference.md`, `unit-conversions.md`, and
+`golden-examples/golden_example_v2.txt` are embedded verbatim as JS string constants in
+`app/index.html` (kept in sync with `scripts/sync-knowledge.py`) and sent as part of the
+system prompt on every AI extraction call. The two SIVANTO golden examples are deliberately
+excluded from that embed — see the comment above `GOLDEN_EXAMPLE_V2_TXT` in `app/index.html`.
 
 ## Priority Order
 
