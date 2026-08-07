@@ -52,7 +52,7 @@ the golden example lists them comma-separated in the label's own order.
 |---|---|---|---|
 | D2.1 | Foliar | `broadcast`, or a foliar spray applied over the whole field by ground boom or aircraft | `Broadcast` |
 | D2.2 | Foliar | `banded`, `band application` | `Banded` |
-| D2.3 | Foliar | `directed spray` / `shielded spray` | `Directed Spray` / `Shielded Spray` |
+| D2.3 | Foliar | `directed spray` / `shielded spray`, stated inside **this crop's own section** (R-23) | `Directed Spray` / `Shielded Spray` |
 | D2.4 | Soil | `chemigation`, `drip`, `trickle`, `micro-sprinkler` | `Chemigation` |
 | D2.5 | Soil | `injection`, `inject below the seed line` | `Injection` |
 | D2.6 | Soil | `in-furrow` | `In-furrow spray` |
@@ -61,6 +61,12 @@ the golden example lists them comma-separated in the label's own order.
 | D2.9 | Seed Treatment | any | `Seed Treatment` |
 
 If none match, `App. Type` stays `NS`.
+
+D2.3 is the rule most often mis-triggered by a shared, non-crop-specific paragraph — a
+product-wide sentence naming "directed spray" can read as applicable to every crop even
+when a given crop's own section states a different method (e.g. its own rate table says
+"broadcast acre"). Confirm the evidence sits inside the crop's own section before applying
+D2.3, per R-23.
 
 ## D3 · App. Timing (Site Status)
 

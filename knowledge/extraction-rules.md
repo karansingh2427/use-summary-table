@@ -437,6 +437,69 @@ the label's value rather than the computed one.
 
 ---
 
+## R-23 · Evidence for App. Type/Target/Equipment must come from the crop's own section
+
+App. Type, App. Target, and App. Equipment values must trace to language inside that crop's
+own block. A sentence that applies broadly across multiple crops (product-wide boilerplate)
+may still supply a value, but only when it is the *only* evidence available and nothing in
+the crop's own section contradicts it. If the crop's own section states or implies a
+different method — e.g. its own rate table says "broadcast acre" while a shared paragraph
+elsewhere says "directed" — the crop's own section wins.
+
+Never paraphrase a label's own wording into an industry-standard synonym (e.g. "ground
+equipment" rewritten as "Ground Boom"). Use the label's exact term. Never reuse a heading or
+section title that appears elsewhere in the document (such as a spray-drift or
+droplet-size-calibration section heading) as if it were this crop's stated application
+method or equipment — a heading is not a use restriction.
+
+**Rule:** before filling App. Type, App. Target, or App. Equipment for a row, locate the
+sentence inside that specific crop's own section first. Only fall back to a shared,
+multi-crop sentence when the crop's own section is silent, and only if nothing in the
+crop's own section conflicts with it. Quote the label's exact wording — never a synonym,
+paraphrase, or a section heading borrowed from elsewhere in the document.
+
+**Mistake logged:** Indaziflam extraction marked a citrus row "Directed" from a shared
+product-wide sentence, even though citrus's own dose chart stated "broadcast acre." The
+same extraction filled App. Equipment with "Ground Boom" — a section heading used elsewhere
+in the document for spray-drift calibration — when the crop's own restriction said "ground
+equipment."
+
+---
+
+## R-24 · Per-application ceiling and annual cap are separate label sentences
+
+`A.I. Max Single Rate/App.` and `A.I. Max Total Rate/Yr.` (or any stated 12-month/annual
+cap) almost always come from two distinct label sentences, even when the label states them
+near each other or the two numbers are numerically close. Never write an annual or season
+cap into the per-application ceiling cell, or vice versa.
+
+**Rule:** locate and cite the per-application sentence and the annual/season-cap sentence
+independently before filling either cell. If only one of the two is stated, leave the other
+`NS` rather than deriving it from the one that is stated.
+
+**Mistake logged:** Indaziflam extraction wrote a 0.088 lb ai/A annual cap into
+`A.I. Max Single Rate/App.` for landscape-ornamental/conifer rows, when the label populated
+that per-application ceiling from a separate fl-oz-range sentence elsewhere in the same
+section.
+
+---
+
+## R-25 · A crop named only inside another group's shared sentence still gets its own row
+
+After building the crop inventory, explicitly check every crop named anywhere in the
+document — including inside another crop group's shared establishment, rotational, or
+exception sentence — against the output table. A crop mentioned only in passing inside a
+different group's paragraph is not "covered" by that group's row.
+
+**Rule:** if the label states any use pattern for a crop — even one folded into another
+crop group's sentence rather than given its own heading — that crop gets its own row.
+
+**Mistake logged:** Indaziflam extraction named pecan only inside the Pome/Stone
+Fruit/Subgroup-23A group's shared 3-year-establishment sentence and never gave it a
+standalone row.
+
+---
+
 ## Pre-flight checklist
 
 Before releasing a table:
@@ -455,3 +518,9 @@ Before releasing a table:
 - [ ] C.C. and Yr columns distinguished; cross-check applied (**R-9**)
 - [ ] AI-level annual caps captured (**R-10**)
 - [ ] `NS` vs `NA` used correctly; no blanks (**R-6**)
+- [ ] App. Type/Target/Equipment traced to the crop's own section, not borrowed from a
+      shared sentence or a section heading elsewhere in the document (**R-23**)
+- [ ] Per-application ceiling and annual cap each traced to their own label sentence, never
+      cross-populated (**R-24**)
+- [ ] Every crop named anywhere in the document — including inside another group's shared
+      sentence — has its own row (**R-25**)
