@@ -100,6 +100,23 @@ ELSE IF it caps "per Crop Season":
 ELSE                                                        -> NS
 ```
 
+**"Per crop year" on a perennial crop matches the first branch, not the second.** A label
+capping a rate "per crop year" for a tree, vine, or other perennial crop (citrus, grape,
+pome/stone fruit, tree nuts, etc.) means the same thing as "per Year" — a perennial crop has
+no discrete, repeatable "season" shorter than a calendar year the way an annual/replantable
+row crop does, so there is exactly one crop cycle per year. Route these to the first branch
+(`Max No. of CC/yr = 1`) rather than the "per Crop Season" branch, which is for annual crops
+that can be replanted more than once within a year. Only route to the "per Crop Season"
+branch when the crop itself is annual/replantable and the label's own timing allows more than
+one planting per calendar year.
+
+**Cascade once CC/yr is known.** When `Max No. of CC/yr = 1` and the label states only a
+single total-per-year (or per-crop-year) cap — no separate, distinct per-crop-cycle cap — one
+crop cycle spans the entire year: `A.I. Max Total Rate/C.C.` equals `A.I. Max Total Rate/Yr.`,
+and `Max # Apps/C.C.` equals `Max # Apps/Yr.`. Leave the C.C. columns `NS` only when the label
+states multiple crop cycles per year (`Max No. of CC/yr` > 1) without separately breaking out
+a per-cycle figure.
+
 ## Abbreviations
 
 `A.I.` / `a.i.` = active ingredient · `C.C.` = Crop Cycle · `MRI` = Minimum Retreatment
@@ -175,7 +192,7 @@ Restriction content must land in the right column:
 | Foliar and soil merged into one row | Treated as one crop rather than one use+method | Compare row count against the label's use tables |
 | Crop-group exception dropped | Name truncated at the group code | Search for `EXCEPT` in the label, then in the table |
 | PHI and REI swapped | Adjacent columns on the label | PHI in days, REI in hours — check magnitudes |
-| Two active ingredients merged | Rates summed or one dropped | Every rate cell should name its a.i. abbreviation |
+| Two active ingredients merged | Rates summed or one dropped, or a per-active cell partially blended with the label's own combined figure | Every rate cell should name its a.i. abbreviation; cross-check per-active doses against any combined figure the label prints (extraction-rules.md R-26) |
 | C.C. and Yr. columns conflated | Similar names, adjacent placement | Cross-check Yr. ≈ C.C. × Max No. of CC/yr |
 | Wording copied from another label | Reused from a golden example or prior log | Search the source PDF for the exact sentence |
 | Blank instead of `NS` | Value written before the fill rule applied | Filter for empty cells |

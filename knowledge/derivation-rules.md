@@ -68,6 +68,15 @@ when a given crop's own section states a different method (e.g. its own rate tab
 "broadcast acre"). Confirm the evidence sits inside the crop's own section before applying
 D2.3, per R-23.
 
+**A shared sentence can still add a value, even under D2.3's own-section check.** R-23's
+"own section wins" test is for *contradicting* evidence, not for a shared sentence that
+states an *additional*, non-conflicting method the crop's own section never rules out. Per
+R-20, when the label offers a choice of methods (e.g. "broadcast treatment or as a banded
+treatment"), carry every option it names — `Broadcast or Band`, not just whichever one
+happens to appear in the crop's own section. Do not let the D2.3/R-23 own-section check be
+read as a reason to stop at one value when a shared sentence supplies another that the
+label itself offers as an alternative.
+
 ## D3 · App. Timing (Site Status)
 
 | # | Evidence | Value |
@@ -123,6 +132,31 @@ load-bearing, and it broke the column: SIVANTO states its pest timing once in th
 directions instead of repeating it per use, so the rule fired on 1 row of 43 while the golden
 records `Post-emergence` on every foliar row. Removed. All three are listed separately here so
 a reviewer can disable them if the convention changes.
+
+---
+
+## D4 · Max # Apps (derived when the count is not stated explicitly)
+
+Some labels state a per-application rate range and a total cap (per crop cycle and/or per
+year) but never state an explicit maximum number of applications anywhere in the document.
+Reading straight for the phrase and finding nothing is not the end of the analysis — the
+count is implied by the other two numbers the label *does* state, the same way D3.10
+derives a timing default from house convention rather than label wording.
+
+| # | Evidence | Value |
+|---|---|---|
+| D4.1 | A total cap (per crop cycle or per year) and a minimum per-application rate are both stated, but no explicit application count appears anywhere in the label | `floor(total cap ÷ minimum per-application rate)`, marked derived |
+
+Cross-check the result against any stated minimum retreatment interval (MRI) where one is
+given — a derived count that would require applications closer together than the MRI
+allows signals a misread cap or rate rather than a valid derivation, and the column should
+revert to `NS` rather than report an inconsistent number.
+
+**This is a derived convention, not a reading of the label**, exactly as D3.10 is for
+`App. Timing (other)`. Mark the cell as derived so a reviewer can distinguish it from a
+verbatim application count, and follow schema-reference.md's Rule 5.1 cascade (§ Max No.
+of CC/yr) once `Max No. of CC/yr` is known — do not derive a `Max # Apps` count for a
+period the label never caps at all.
 
 ---
 

@@ -464,6 +464,22 @@ same extraction filled App. Equipment with "Ground Boom" — a section heading u
 in the document for spray-drift calibration — when the crop's own restriction said "ground
 equipment."
 
+**Supplementary evidence is not contradicting evidence.** "Own section wins" above applies
+when the crop's own section and a shared sentence **disagree** (broadcast vs. directed).
+It does not apply when a shared, product-wide sentence states an **additional** method that
+the crop's own section never rules out — that is supplementary evidence, and R-20 already
+requires carrying both. Do not read R-23 as license to stop at whatever the crop's own
+section states and ignore a shared sentence that only *adds* an option.
+
+**Mistake logged:** Alion Complete's citrus/grape/pome/stone/tree-nut rate tables each state
+a rate "per broadcast acre" and nothing else inside the crop's own section; a separate
+general-directions sentence states the product "may be applied to the soil as a uniform
+broadcast or band application," with its own banding-rate conversion formula elsewhere in
+the document. Every row was written `Broadcast`, dropping the band option that R-20's own
+worked example (`"broadcast treatment or as a banded treatment"` → `Broadcast or Band`)
+already covers — because the crop's own section wasn't silent (it said "broadcast"), R-23
+was misread as blocking the supplementary sentence rather than adding to it.
+
 ---
 
 ## R-24 · Per-application ceiling and annual cap are separate label sentences
@@ -500,6 +516,35 @@ standalone row.
 
 ---
 
+## R-26 · On a multi-active-ingredient product, check a per-active rate against the label's own combined figure
+
+Some labels print a combined (all-actives-summed) `lb ai/A` figure in the same rate table
+cell as the product-unit rate, alongside — not instead of — a per-active breakdown stated
+elsewhere (often in a Restrictions/Precautions sentence that names each active separately).
+A per-active cell that was actually built from, or partially blended with, the combined
+figure will disagree with the label's own per-active sentence while looking plausible on
+its own.
+
+**Rule:** when a product has more than one active ingredient, compute each active's dose at
+a given rate point from the label's own declared concentration (e.g. "Contains 0.243 pound
+indaziflam per U.S. pound of formulation"), applied to that same rate point independently
+per active. Where the label also prints a combined `lb ai/A` figure at that rate point,
+sum the per-active doses you computed and confirm the sum matches the label's combined
+figure (within rounding). A mismatch means a per-active cell was built from, or contaminated
+by, the combined figure rather than computed for that active alone — recompute it from the
+concentration, not from the combined number.
+
+**Mistake logged:** Alion Complete (indaziflam 24.30% + rimsulfuron 16.67%) prints a
+combined figure in its rate tables — e.g. `3.0 - 5.6 oz (0.076 to 0.143 lb ai/A)` for
+pome/stone/tree-nut, `3.0 - 4.3 oz (0.076 - 0.110 lb ai/A)` for grape — that is the *sum* of
+both actives, not indaziflam alone. An extraction wrote indaziflam-only cells of `0.0413`
+(3.0 oz floor) and `0.059` (4.3 oz grape rate) — values between the correct indaziflam-alone
+figures (`0.046`, `0.065`, computed from the label's own 0.243 lb/lb concentration) and the
+label's combined figures (`0.076`, `0.110`) — indicating the two actives were partially
+blended rather than computed separately.
+
+---
+
 ## Pre-flight checklist
 
 Before releasing a table:
@@ -519,8 +564,11 @@ Before releasing a table:
 - [ ] AI-level annual caps captured (**R-10**)
 - [ ] `NS` vs `NA` used correctly; no blanks (**R-6**)
 - [ ] App. Type/Target/Equipment traced to the crop's own section, not borrowed from a
-      shared sentence or a section heading elsewhere in the document (**R-23**)
+      shared sentence or a section heading elsewhere in the document; a shared sentence that
+      only *adds* a method (not contradicts one) is still carried per R-20 (**R-23**)
 - [ ] Per-application ceiling and annual cap each traced to their own label sentence, never
       cross-populated (**R-24**)
 - [ ] Every crop named anywhere in the document — including inside another group's shared
       sentence — has its own row (**R-25**)
+- [ ] On multi-active-ingredient products, per-active rate cells sum to any combined `lb ai/A`
+      figure the label prints at that same rate point (**R-26**)
