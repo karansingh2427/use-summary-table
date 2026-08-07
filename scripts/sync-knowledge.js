@@ -71,8 +71,11 @@ replacements.forEach(({ name, content, pattern }) => {
   
   if (appHTML.match(pattern)) {
     const oldHTML = appHTML;
-    appHTML = appHTML.replace(pattern, newDeclaration);
-    
+    // Use a function replacer, not the string directly — String.replace() special-cases
+    // "$&", "$1", "$$", etc. in a string replacement, which would corrupt any knowledge
+    // content containing a literal "$". A function's return value is inserted verbatim.
+    appHTML = appHTML.replace(pattern, () => newDeclaration);
+
     if (oldHTML !== appHTML) {
       console.log(`✓ Updated ${name} (${content.length} chars)`);
       changesMade++;
