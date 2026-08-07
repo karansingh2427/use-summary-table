@@ -467,6 +467,8 @@
     </p>
     <div class="notice" id="qcGate" role="status" aria-live="polite"><span id="qcGateIcon" aria-hidden="true">🛡</span><span id="qcGateText"></span></div>
     <div class="qc-defects" id="qcDefects" role="region" aria-label="QC gate defects"></div>
+    <div class="notice" id="aiQcGate" role="status" aria-live="polite" style="display:none"><span id="aiQcGateIcon" aria-hidden="true">🧪</span><span id="aiQcGateText"></span></div>
+    <div class="qc-defects" id="aiQcDefects" role="region" aria-label="AI QC review (informational)"></div>
     <div class="review-gate" id="reviewGate" role="region" aria-label="Pre-finalization review stations">
       <h4>Review stations</h4>
       <p class="stage-title" id="reviewStageTitle"></p>
@@ -2657,6 +2659,10 @@ const qcGateEl      = document.getElementById("qcGate");
 const qcGateIconEl  = document.getElementById("qcGateIcon");
 const qcGateTextEl  = document.getElementById("qcGateText");
 const qcDefectsEl   = document.getElementById("qcDefects");
+const aiQcGateEl      = document.getElementById("aiQcGate");
+const aiQcGateIconEl  = document.getElementById("aiQcGateIcon");
+const aiQcGateTextEl  = document.getElementById("aiQcGateText");
+const aiQcDefectsEl   = document.getElementById("aiQcDefects");
 const reviewGateEl  = document.getElementById("reviewGate");
 const reviewStageTitleEl = document.getElementById("reviewStageTitle");
 const reviewStageTextEl = document.getElementById("reviewStageText");
@@ -2733,6 +2739,55 @@ function renderQcGateReport(report) {
     </div>`;
   qcDefectsEl.querySelector(".qc-defects-header").addEventListener("click", () => {
     qcDefectsEl.classList.toggle("collapsed");
+  });
+}
+
+// Renders the independent LLM QC agent's findings (extractWithLLM's stage
+// 3/4 output). Always rendered when AI extraction ran — this panel is
+// advisory/informational only, never a gate: results are shown regardless
+// of what it reports, per the app's existing QC philosophy above.
+function renderAiQcReport(aiQcReports) {
+  if (!aiQcReports || !aiQcReports.length) {
+    aiQcGateEl.style.display = "none";
+    aiQcDefectsEl.style.display = "none";
+    aiQcDefectsEl.innerHTML = "";
+    return;
+  }
+
+  const allDefects = aiQcReports.flatMap(({ fileName, qcReport }) =>
+    (qcReport.defects || []).map(d => ({ ...d, fileName }))
+  );
+  const worstRank = { Critical: 4, High: 3, Medium: 2, Low: 1, Clean: 0 };
+  const overall = aiQcReports.reduce((worst, { qcReport }) =>
+    (worstRank[qcReport.overall] || 0) > (worstRank[worst] || 0) ? qcReport.overall : worst, "Clean");
+
+  aiQcGateEl.style.display = "flex";
+  aiQcGateEl.classList.toggle("error", overall === "Critical" || overall === "High");
+  aiQcGateIconEl.textContent = overall === "Clean" ? "✔" : "🧪";
+  aiQcGateTextEl.textContent = overall === "Clean"
+    ? `AI QC review (informational): clean across ${aiQcReports.length} document(s) — extraction agent → QC agent, both passed.`
+    : `AI QC review (informational): ${overall} overall, ${allDefects.length} defect(s) noted across ${aiQcReports.length} document(s) after the validation/remediation loop. This does not block results — review before relying on flagged rows.`;
+
+  if (!allDefects.length) {
+    aiQcDefectsEl.style.display = "none";
+    aiQcDefectsEl.innerHTML = "";
+    return;
+  }
+
+  aiQcDefectsEl.style.display = "block";
+  aiQcDefectsEl.classList.add("collapsed");
+  aiQcDefectsEl.innerHTML = `
+    <div class="qc-defects-header">
+      <span><strong>AI QC Notes</strong> (${allDefects.length}, informational)</span>
+      <span class="qc-defects-toggle">▸</span>
+    </div>
+    <div class="qc-defects-content">
+      <ul>${allDefects.map(d =>
+        `<li><b>${esc(d.severity || "Low")}</b> · ${esc(d.fileName)} row ${d.row_index} · ${esc(d.column || "")} — ${esc(d.issue || "")}</li>`
+      ).join("")}</ul>
+    </div>`;
+  aiQcDefectsEl.querySelector(".qc-defects-header").addEventListener("click", () => {
+    aiQcDefectsEl.classList.toggle("collapsed");
   });
 }
 
@@ -3419,6 +3474,32 @@ function exportRows(rows) {
 /** Export column order. Not part of SCHEMA — the 27 columns stay fixed. */
 const EXPORT_COLUMNS = ["Source File", ...DISPLAY_COLUMNS, DERIVED_COLUMN];
 
+/** Columns for the informational "QC Notes" sheet — the independent LLM QC
+    agent's findings (extractWithLLM's QC/remediation stages), not a gate. */
+const QC_NOTES_COLUMNS = ["Source File", "Overall", "Row #", "Column", "Severity", "Note"];
+
+function buildQcNotesRows(aiQcReports) {
+  const rows = [];
+  (aiQcReports || []).forEach(({ fileName, qcReport }) => {
+    const defects = (qcReport && qcReport.defects) || [];
+    if (!defects.length) {
+      rows.push({
+        "Source File": fileName, "Overall": (qcReport && qcReport.overall) || "Clean",
+        "Row #": "", "Column": "", "Severity": "", "Note": "No defects found."
+      });
+      return;
+    }
+    defects.forEach(d => {
+      rows.push({
+        "Source File": fileName, "Overall": (qcReport && qcReport.overall) || "",
+        "Row #": d.row_index, "Column": d.column || "", "Severity": d.severity || "",
+        "Note": d.issue || ""
+      });
+    });
+  });
+  return rows;
+}
+
 function safeSheetName(name, used) {
   const base = String(name || "Sheet")
     .replace(/[\\\/?*\[\]:]/g, " ")
@@ -3598,6 +3679,13 @@ downloadBtn.addEventListener("click", () => {
     XLSX.utils.book_append_sheet(wb, ws, safeSheetName(file, usedNames));
   }
 
+  if (window.__aiQcReports && window.__aiQcReports.length) {
+    const qcNotesRows = buildQcNotesRows(window.__aiQcReports);
+    const wsQc = XLSX.utils.json_to_sheet(qcNotesRows, { header: QC_NOTES_COLUMNS });
+    XLSX.utils.sheet_add_aoa(wsQc, [QC_NOTES_COLUMNS], { origin: "A1" });
+    XLSX.utils.book_append_sheet(wb, wsQc, safeSheetName("QC Notes", usedNames));
+  }
+
   const stamp = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `Use_Summary_Table_${stamp}.xlsx`, { compression: true, cellStyles: true });
   statusEl.textContent = `Excel downloaded (${allRows.length} row${allRows.length === 1 ? "" : "s"}).`;
@@ -3691,53 +3779,62 @@ runBtn.addEventListener("click", async () => {
  *  parseDocument() produces (built from blankRow(), scored via scoreRow())
  *  so rendering and export need no separate code path. Throws on any
  *  API/network failure — callers must not silently fall back to regex. */
-async function extractWithLLM(doc) {
-  const pageMarkedText = doc.pages
-    .map((text, i) => `--- PAGE ${i + 1} ---\n${text}`)
-    .join("\n\n");
+// Per-column definitions from knowledge/UST_definitions.txt — the schema's
+// authoritative source. Without these the model only sees the bare column
+// name and has to guess its meaning: "Use" was guessed as the herbicide's
+// mode of action ("Herbicide - Weed Control (Burndown)") instead of the
+// crop/site name UST_definitions.txt actually specifies, since nothing
+// told the model otherwise.
+const COLUMN_DEFINITIONS = {
+  "Reg. #/File Sym": "EPA Registration Number (or File Symbol if pending registration).",
+  "Physical Form": "Type of formulation — WP, SC, Granular, WDG, etc.",
+  "Product Name (PBN)": "Primary Brand Name.",
+  "Use": "The crop, crop group, turf, plantscape, seed treatment, etc. this row applies to — e.g. \"SOYBEAN\", \"CITRUS FRUITS (CROP GROUP 10-10)\", \"Turf\". This is a crop/site name, NOT a description of what the product does (do not write things like \"Herbicide - Weed Control\" here — that belongs in App. Target / Additional Information).",
+  "Use Site": "Agricultural (Outdoor), Greenhouse (Indoor), Residential (Outdoor), etc.",
+  "App. Target": "foliar, soil, seed treatment.",
+  "App. Type": "broadcast, banded, soil drench, etc.",
+  "App. Equipment": "the application equipment, in the label's own words (e.g. \"aerial\", \"ground\", \"handheld\") — never a paraphrase or a term borrowed from elsewhere in the document.",
+  "App. Timing (Site Status)": "pre- or post-(crop) emergent, at-planting, post-transplant, etc.",
+  "App. Timing (other)": "specific timing when it's dependent on pest pressure or otherwise not tied to crop emergence, e.g. \"when pests occur\".",
+  "App Rate (lb ai/A)": "the actual applied rate, in lb a.i./A — distinct from Max Single Rate.",
+  "A.I. Max Single Rate/App. (lb a.i./A)": "maximum single rate of active ingredient for this use/use site.",
+  "Max # Apps/C.C.": "maximum number of applications per crop cycle.",
+  "A.I. Max Total Rate/C.C. (lb a.i./A)": "maximum total rate of active ingredient per crop cycle.",
+  "Max # Apps/Yr.": "maximum number of applications within a 12-month period.",
+  "A.I. Max Total Rate/Yr. (lb a.i./A)": "maximum total rate of active ingredient within a 12-month period.",
+  "MRI (days)": "minimum retreatment interval, in days.",
+  "REI": "restricted entry interval, in hours (not days — do not confuse with PHI).",
+  "PHI (days)": "preharvest interval, in days (not hours — do not confuse with REI).",
+  "PPE": "personal protective equipment required, copied verbatim from the label's PPE section.",
+  "Additional Information": "info relevant to rates not captured in previous columns, plus AI-level annual caps and other required capture that has no other column.",
+  "Max No. of CC/yr": "maximum number of crop cycles per 12-month period.",
+  "Geographic Restrictions": "e.g. \"Not registered for use in XX\"; \"product only used in lower 48 (CONUS)\"; etc.",
+  "Drift Restrictions": "wind speed, boom height, droplet size, buffer distances.",
+  "Soil Restrictions": "incorporate into soil, leave on soil surface, minimum incorporation depth, etc.",
+  "On-field Non-target Species Restrictions": "typically pollinator protections but other non-target species may apply.",
+  "Additional Restrictions for Use/Use Site": "tank-mix prohibitions, adjuvant prohibitions, grazing limits, etc."
+};
 
-  const MAX_CHARS = 150000;
-  if (pageMarkedText.length > MAX_CHARS) {
-    logEl.textContent += `   ⚠ ${doc.fileName} is ${pageMarkedText.length.toLocaleString()} characters — `
-      + `above the ~${MAX_CHARS.toLocaleString()}-character single-call guideline; sending the full text anyway (no chunking in v1).\n`;
-  }
+// Same-origin relay — the browser never talks to chat.int.bayer.com directly
+// (no CORS dependency, no per-colleague credential). The Pages Function at
+// functions/api/extract.js adds the shared pilot mGA credential server-side
+// before forwarding.
+const RELAY_ENDPOINT = "/api/extract";
+// A label with dozens of crop sections needs a large structured-output
+// budget — 8192 truncated so early on a ~85-crop label that zero complete
+// rows made it into the response. Claude Sonnet 4.x supports much larger
+// max_tokens directly (no beta header needed).
+const MAX_TOKENS = 64000;
 
-  // Per-column definitions from knowledge/UST_definitions.txt — the schema's
-  // authoritative source. Without these the model only sees the bare column
-  // name and has to guess its meaning: "Use" was guessed as the herbicide's
-  // mode of action ("Herbicide - Weed Control (Burndown)") instead of the
-  // crop/site name UST_definitions.txt actually specifies, since nothing
-  // told the model otherwise.
-  const COLUMN_DEFINITIONS = {
-    "Reg. #/File Sym": "EPA Registration Number (or File Symbol if pending registration).",
-    "Physical Form": "Type of formulation — WP, SC, Granular, WDG, etc.",
-    "Product Name (PBN)": "Primary Brand Name.",
-    "Use": "The crop, crop group, turf, plantscape, seed treatment, etc. this row applies to — e.g. \"SOYBEAN\", \"CITRUS FRUITS (CROP GROUP 10-10)\", \"Turf\". This is a crop/site name, NOT a description of what the product does (do not write things like \"Herbicide - Weed Control\" here — that belongs in App. Target / Additional Information).",
-    "Use Site": "Agricultural (Outdoor), Greenhouse (Indoor), Residential (Outdoor), etc.",
-    "App. Target": "foliar, soil, seed treatment.",
-    "App. Type": "broadcast, banded, soil drench, etc.",
-    "App. Equipment": "the application equipment, in the label's own words (e.g. \"aerial\", \"ground\", \"handheld\") — never a paraphrase or a term borrowed from elsewhere in the document.",
-    "App. Timing (Site Status)": "pre- or post-(crop) emergent, at-planting, post-transplant, etc.",
-    "App. Timing (other)": "specific timing when it's dependent on pest pressure or otherwise not tied to crop emergence, e.g. \"when pests occur\".",
-    "App Rate (lb ai/A)": "the actual applied rate, in lb a.i./A — distinct from Max Single Rate.",
-    "A.I. Max Single Rate/App. (lb a.i./A)": "maximum single rate of active ingredient for this use/use site.",
-    "Max # Apps/C.C.": "maximum number of applications per crop cycle.",
-    "A.I. Max Total Rate/C.C. (lb a.i./A)": "maximum total rate of active ingredient per crop cycle.",
-    "Max # Apps/Yr.": "maximum number of applications within a 12-month period.",
-    "A.I. Max Total Rate/Yr. (lb a.i./A)": "maximum total rate of active ingredient within a 12-month period.",
-    "MRI (days)": "minimum retreatment interval, in days.",
-    "REI": "restricted entry interval, in hours (not days — do not confuse with PHI).",
-    "PHI (days)": "preharvest interval, in days (not hours — do not confuse with REI).",
-    "PPE": "personal protective equipment required, copied verbatim from the label's PPE section.",
-    "Additional Information": "info relevant to rates not captured in previous columns, plus AI-level annual caps and other required capture that has no other column.",
-    "Max No. of CC/yr": "maximum number of crop cycles per 12-month period.",
-    "Geographic Restrictions": "e.g. \"Not registered for use in XX\"; \"product only used in lower 48 (CONUS)\"; etc.",
-    "Drift Restrictions": "wind speed, boom height, droplet size, buffer distances.",
-    "Soil Restrictions": "incorporate into soil, leave on soil surface, minimum incorporation depth, etc.",
-    "On-field Non-target Species Restrictions": "typically pollinator protections but other non-target species may apply.",
-    "Additional Restrictions for Use/Use Site": "tank-mix prohibitions, adjuvant prohibitions, grazing limits, etc."
-  };
+// A label with dozens of crop sections needs at least two validation and two
+// remediation passes to catch the class of error a single-shot extraction
+// misses (evidence borrowed from the wrong crop section, a rate ceiling
+// conflated with an annual cap, a crop named only inside another group's
+// sentence). These caps bound worst-case latency/cost per document.
+const VALIDATION_MAX_CYCLES = 2;
+const REMEDIATION_MAX_CYCLES = 2;
 
+function buildRowSchemaTool() {
   const rowProperties = {};
   SCHEMA.forEach(col => {
     rowProperties[col] = { type: "string" };
@@ -3752,9 +3849,9 @@ async function extractWithLLM(doc) {
     description: "A short verbatim phrase copied from the label text, at the cited page, that supports this row (per R-5 — never paraphrased, never from another label)."
   };
 
-  const tool = {
+  return {
     name: "emit_use_summary_rows",
-    description: "Emit one row per use + use site + application method found in the label, per the extraction and derivation rules provided.",
+    description: "Emit one row per use + use site + application method found in the label, per the extraction and derivation rules provided. Also used to emit a corrected row set during validation/remediation — always emit the complete row set, not just the changed rows.",
     input_schema: {
       type: "object",
       properties: {
@@ -3770,10 +3867,84 @@ async function extractWithLLM(doc) {
       required: ["rows"]
     }
   };
+}
 
-  const systemPrompt = [
-    "You are a regulatory extraction analyst building a Use Summary Table from a pesticide label PDF's text.",
-    "Read the label text end-to-end and apply the rules below exactly as written — they encode past mistakes and the analyst's own conventions. Never invent a value; every cell must trace to the label text you were given, at the page you cite.",
+function buildValidationReportTool() {
+  return {
+    name: "emit_validation_report",
+    description: "Report the result of validating the current row set against Pass A (completeness) and Pass B (field fidelity). Report only — do not correct rows in this call.",
+    input_schema: {
+      type: "object",
+      properties: {
+        pass: { type: "boolean", description: "true only if both Pass A and Pass B found nothing to flag." },
+        issues: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              row_index: { type: "integer", description: "0-based index into the current row set this issue applies to, or -1 for a missing-row completeness gap." },
+              column: { type: "string", description: "Schema column name this issue concerns, or \"(missing row)\" for a completeness gap." },
+              issue: { type: "string", description: "What is wrong, and what the label actually states, so it can be corrected." }
+            },
+            required: ["row_index", "column", "issue"]
+          }
+        }
+      },
+      required: ["pass", "issues"]
+    }
+  };
+}
+
+function buildQcReportTool() {
+  return {
+    name: "emit_qc_report",
+    description: "Report the result of an independent QC review across all 5 passes (structural, column-wise plausibility, row-wise verification, completeness, confidence calibration). Report only — do not correct rows in this call.",
+    input_schema: {
+      type: "object",
+      properties: {
+        overall: {
+          type: "string",
+          enum: ["Clean", "Low", "Medium", "High", "Critical"],
+          description: "The highest severity defect found across all passes, or Clean if none."
+        },
+        defects: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              row_index: { type: "integer", description: "0-based index into the row set this defect applies to, or -1 for a missing-row gap." },
+              column: { type: "string" },
+              severity: { type: "string", enum: ["Low", "Medium", "High", "Critical"] },
+              issue: { type: "string" }
+            },
+            required: ["row_index", "column", "severity", "issue"]
+          }
+        }
+      },
+      required: ["overall", "defects"]
+    }
+  };
+}
+
+function buildTools() {
+  // All three tool schemas are sent on every call, regardless of stage —
+  // tool_choice forces which one actually fires. Keeping the tools array
+  // byte-identical across every call in the pipeline (extraction,
+  // validation, QC, remediation) is what lets the knowledge-block cache
+  // breakpoint below survive across stages instead of invalidating every
+  // time the forced tool changes.
+  return [buildRowSchemaTool(), buildValidationReportTool(), buildQcReportTool()];
+}
+
+// Single cache breakpoint on the entire knowledge base (rules + schema +
+// unit conversions + golden example) — identical text on every call this
+// function makes for a document, across all 4 stages, so it's the highest-
+// leverage place to cache. Deliberately holds no stage-specific persona
+// text: that lives in the per-turn user message instead, so it never
+// invalidates this breakpoint.
+function buildSystemBlocks() {
+  const text = [
+    "You are a meticulous regulatory analyst working with pesticide label text to build and verify a Use Summary Table. Read label text end-to-end. Never invent a value — every cell must trace to the label text you were given, at the page you cite. Apply the rules below exactly as written; they encode past mistakes and required conventions.",
     "",
     "Every row must have exactly these columns. Never leave a cell blank: `NS` = the label is silent on this value, `NA` = the column does not apply to this use.",
     JSON.stringify(SCHEMA),
@@ -3789,24 +3960,26 @@ async function extractWithLLM(doc) {
     "The following is a small worked example showing the expected shape of a finished table (tab-separated, one row shown). Per R-5, this teaches shape only — never copy its wording or values into an actual extraction; every cell must trace to the label you were given.",
     GOLDEN_EXAMPLE_V2_TXT
   ].join("\n");
+  return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
+}
 
-  const userPrompt = [
-    `Label file: ${doc.fileName}`,
-    `The label text below is split into pages marked "--- PAGE N ---". Cite the page each row's use is found on in the "Page" field, and a short verbatim supporting phrase in "Evidence".`,
-    "",
-    pageMarkedText
-  ].join("\n");
+// Second cache breakpoint, on the per-document label text — call-invariant
+// across every stage for a given document, including the QC stage's fresh
+// conversation, as long as stage-specific instructions are appended AFTER
+// this block (never before it) so they don't disturb the cached prefix.
+function buildDocMessageBlocks(doc, pageMarkedText, stageInstructionText) {
+  const blocks = [
+    {
+      type: "text",
+      text: `Label file: ${doc.fileName}\nThe label text below is split into pages marked "--- PAGE N ---". Cite the page each row's use is found on in the "Page" field, and a short verbatim supporting phrase in "Evidence".`
+    },
+    { type: "text", text: pageMarkedText, cache_control: { type: "ephemeral" } }
+  ];
+  if (stageInstructionText) blocks.push({ type: "text", text: stageInstructionText });
+  return blocks;
+}
 
-  // Same-origin relay — the browser never talks to chat.int.bayer.com
-  // directly (no CORS dependency, no per-colleague credential). The Pages
-  // Function at functions/api/extract.js adds the shared pilot mGA
-  // credential server-side before forwarding.
-  const RELAY_ENDPOINT = "/api/extract";
-  // A label with dozens of crop sections needs a large structured-output
-  // budget — 8192 truncated so early on a ~85-crop label that zero complete
-  // rows made it into the response. Claude Sonnet 4.x supports much larger
-  // max_tokens directly (no beta header needed).
-  const MAX_TOKENS = 64000;
+async function callAnthropic(messages, systemBlocks, tools, toolChoiceName) {
   const response = await fetch(RELAY_ENDPOINT, {
     method: "POST",
     headers: {
@@ -3818,10 +3991,10 @@ async function extractWithLLM(doc) {
     body: JSON.stringify({
       model: "claude-sonnet-5",
       max_tokens: MAX_TOKENS,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }],
-      tools: [tool],
-      tool_choice: { type: "tool", name: "emit_use_summary_rows" }
+      system: systemBlocks,
+      messages,
+      tools,
+      tool_choice: { type: "tool", name: toolChoiceName }
     })
   });
 
@@ -3835,12 +4008,132 @@ async function extractWithLLM(doc) {
   if (data.stop_reason === "max_tokens") {
     // The tool-use JSON may be cut off mid-row — surface this rather than
     // silently presenting a possibly-truncated row set as complete.
-    logEl.textContent += `   ⚠ ${doc.fileName}: the model's response hit the ${MAX_TOKENS}-token output limit — some rows may be missing or the last row incomplete.\n`;
+    logEl.textContent += `   ⚠ response hit the ${MAX_TOKENS}-token output limit for this turn — output may be truncated.\n`;
   }
-  const toolUse = (data.content || []).find(b => b.type === "tool_use" && b.name === "emit_use_summary_rows");
-  if (!toolUse) throw new Error("Model response did not include the expected structured output.");
+  const toolUse = (data.content || []).find(b => b.type === "tool_use" && b.name === toolChoiceName);
+  if (!toolUse) throw new Error(`Model response did not include the expected structured output (${toolChoiceName}).`);
+  return { data, toolUse };
+}
 
-  const rawRows = toolUse.input?.rows || [];
+// Stage 1 — extraction agent: read the label, emit the initial row set.
+async function runExtractionTurn(doc, pageMarkedText, systemBlocks, tools) {
+  const stageText = "Read the entire label above and emit one row per use + use site + application method, per the rules and schema in the system prompt.";
+  const messages = [
+    { role: "user", content: buildDocMessageBlocks(doc, pageMarkedText, stageText) }
+  ];
+  const { data, toolUse } = await callAnthropic(messages, systemBlocks, tools, "emit_use_summary_rows");
+  messages.push({ role: "assistant", content: data.content });
+  return { messages, rawRows: toolUse.input?.rows || [], lastToolUseId: toolUse.id };
+}
+
+// Stage 2 — generation → validation → correction loop, run in the same
+// conversation as extraction so the model can see its own prior reasoning.
+async function runValidationCorrectionLoop(state, systemBlocks, tools) {
+  let { messages, rawRows, lastToolUseId } = state;
+  for (let cycle = 1; cycle <= VALIDATION_MAX_CYCLES; cycle++) {
+    logEl.textContent += `   validation cycle ${cycle}/${VALIDATION_MAX_CYCLES}…\n`;
+    messages.push({
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: lastToolUseId, content: "Received." },
+        {
+          type: "text",
+          text: "Run Pass A (completeness — every crop/use-site/method variation the label states, R-17/R-21/R-25) and Pass B (field fidelity — App. Type/Timing/Equipment wording, rate ceiling vs. annual cap, PHI/REI, NS vs. NA, per R-18/R-19/R-20/R-23/R-24) against the current rows. Report every issue found; do not correct anything in this call."
+        }
+      ]
+    });
+    const val = await callAnthropic(messages, systemBlocks, tools, "emit_validation_report");
+    messages.push({ role: "assistant", content: val.data.content });
+    const report = val.toolUse.input || {};
+    const issues = report.issues || [];
+    lastToolUseId = val.toolUse.id;
+    if (report.pass || issues.length === 0) {
+      logEl.textContent += `   validation cycle ${cycle}: clean.\n`;
+      break;
+    }
+    logEl.textContent += `   validation cycle ${cycle}: ${issues.length} issue(s) flagged — correcting…\n`;
+    messages.push({
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: lastToolUseId, content: "Received." },
+        {
+          type: "text",
+          text: `Correct the rows to resolve every issue below, then re-emit the complete corrected row set (not just the changed rows):\n${JSON.stringify(issues)}`
+        }
+      ]
+    });
+    const corr = await callAnthropic(messages, systemBlocks, tools, "emit_use_summary_rows");
+    messages.push({ role: "assistant", content: corr.data.content });
+    rawRows = corr.toolUse.input?.rows || rawRows;
+    lastToolUseId = corr.toolUse.id;
+  }
+  return { messages, rawRows, lastToolUseId };
+}
+
+// Stage 3 — QC agent: a fresh conversation, independent of the extractor's
+// own reasoning, auditing the validated row set against the label text.
+async function runQcTurn(rawRows, doc, pageMarkedText, systemBlocks, tools) {
+  const stageText = [
+    "You are now acting as an independent QC reviewer — a senior regulatory manager auditing someone else's extraction, not the person who produced it. Run all 5 passes: structural (schema compliance, no blanks), column-wise plausibility, row-wise verification against the label text above, completeness (every crop/use/method the label states, R-17/R-21/R-25), and confidence calibration.",
+    "The candidate row set to review (JSON, 0-based indices):",
+    JSON.stringify(rawRows)
+  ].join("\n");
+  const messages = [
+    { role: "user", content: buildDocMessageBlocks(doc, pageMarkedText, stageText) }
+  ];
+  const { data, toolUse } = await callAnthropic(messages, systemBlocks, tools, "emit_qc_report");
+  messages.push({ role: "assistant", content: data.content });
+  return { messages, qcReport: toolUse.input || { overall: "Clean", defects: [] }, lastToolUseId: toolUse.id };
+}
+
+// Stage 4 — bounded remediation loop: only engages when QC found Critical/
+// High defects, and never blocks — whatever the final QC report says, rows
+// and report both flow through to rendering/export (see finishRun).
+async function runRemediationLoop(state, rawRows, systemBlocks, tools) {
+  let { messages, qcReport, lastToolUseId } = state;
+  let cycle = 0;
+  const needsFix = r => r && (r.overall === "Critical" || r.overall === "High");
+  while (needsFix(qcReport) && cycle < REMEDIATION_MAX_CYCLES) {
+    cycle++;
+    logEl.textContent += `   remediation cycle ${cycle}/${REMEDIATION_MAX_CYCLES}: ${(qcReport.defects || []).length} defect(s) (${qcReport.overall}) — correcting…\n`;
+    messages.push({
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: lastToolUseId, content: "Received." },
+        {
+          type: "text",
+          text: `Correct the rows to resolve every defect below, then re-emit the complete corrected row set (not just the changed rows):\n${JSON.stringify(qcReport.defects || [])}`
+        }
+      ]
+    });
+    const corr = await callAnthropic(messages, systemBlocks, tools, "emit_use_summary_rows");
+    messages.push({ role: "assistant", content: corr.data.content });
+    rawRows = corr.toolUse.input?.rows || rawRows;
+
+    messages.push({
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: corr.toolUse.id, content: "Received." },
+        { type: "text", text: "Re-run the full 5-pass QC review against the corrected rows." }
+      ]
+    });
+    const recheck = await callAnthropic(messages, systemBlocks, tools, "emit_qc_report");
+    messages.push({ role: "assistant", content: recheck.data.content });
+    qcReport = recheck.toolUse.input || qcReport;
+    lastToolUseId = recheck.toolUse.id;
+  }
+  logEl.textContent += cycle > 0
+    ? `   remediation complete after ${cycle} cycle(s) — final QC status: ${qcReport.overall}.\n`
+    : `   QC review: ${qcReport.overall}${(qcReport.defects || []).length ? ` (${qcReport.defects.length} defect(s), below remediation threshold)` : " — clean"}.\n`;
+  return { rawRows, qcReport };
+}
+
+// R-16 safety net — prompt compliance isn't guaranteed; a model can still
+// emit two rows with identical values across every schema column (an
+// outright duplicate, never a valid reading of a label). Collapse those
+// here rather than trusting the prompt alone. Applied once, on the final
+// row set, after every pipeline stage above has run.
+function buildAppRows(rawRows, doc) {
   const rows = rawRows.map(raw => {
     const row = blankRow();
     SCHEMA.forEach(col => {
@@ -3855,10 +4148,6 @@ async function extractWithLLM(doc) {
     return row;
   });
 
-  // R-16 safety net — prompt compliance isn't guaranteed; a model can still
-  // emit two rows with identical values across every schema column (an
-  // outright duplicate, never a valid reading of a label). Collapse those
-  // here rather than trusting the prompt alone.
   const seenRowKeys = new Set();
   const dedupedRows = [];
   let duplicateRowCount = 0;
@@ -3878,6 +4167,41 @@ async function extractWithLLM(doc) {
   return dedupedRows;
 }
 
+// Orchestrator — runs the extraction agent, then the QC agent, per the
+// behavior specified in .github/agents/orchestrator.agent.md /
+// extraction-main.agent.md / QC-agent.agent.md, ported into this app's
+// actual runtime path instead of a manually-driven Copilot Chat session.
+async function extractWithLLM(doc) {
+  const pageMarkedText = doc.pages
+    .map((text, i) => `--- PAGE ${i + 1} ---\n${text}`)
+    .join("\n\n");
+
+  const MAX_CHARS = 150000;
+  if (pageMarkedText.length > MAX_CHARS) {
+    logEl.textContent += `   ⚠ ${doc.fileName} is ${pageMarkedText.length.toLocaleString()} characters — `
+      + `above the ~${MAX_CHARS.toLocaleString()}-character single-call guideline; sending the full text anyway (no chunking in v1).\n`;
+  }
+
+  const systemBlocks = buildSystemBlocks();
+  const tools = buildTools();
+
+  logEl.textContent += `   stage 1/4 — extraction…\n`;
+  const extraction = await runExtractionTurn(doc, pageMarkedText, systemBlocks, tools);
+  logEl.textContent += `   ${extraction.rawRows.length} row(s) from initial extraction\n`;
+
+  logEl.textContent += `   stage 2/4 — validate & correct (up to ${VALIDATION_MAX_CYCLES} cycle(s))…\n`;
+  const validated = await runValidationCorrectionLoop(extraction, systemBlocks, tools);
+
+  logEl.textContent += `   stage 3/4 — independent QC review…\n`;
+  const qc = await runQcTurn(validated.rawRows, doc, pageMarkedText, systemBlocks, tools);
+
+  logEl.textContent += `   stage 4/4 — bounded remediation (up to ${REMEDIATION_MAX_CYCLES} cycle(s))…\n`;
+  const remediated = await runRemediationLoop(qc, validated.rawRows, systemBlocks, tools);
+
+  const rows = buildAppRows(remediated.rawRows, doc);
+  return { rows, qcReport: remediated.qcReport };
+}
+
 /** Parse, render and report. Split out so the AI picker can resume it. */
 async function finishRun(documents, totalPages, selectedAi) {
   aiPicker.style.display = "none";
@@ -3888,6 +4212,7 @@ async function finishRun(documents, totalPages, selectedAi) {
   // LLM read the label and apply EXTRACTION_RULES_MD / DERIVATION_RULES_MD.
   statusEl.textContent = "Parsing uses and application methods…";
   allRows = [];
+  const aiQcReports = [];
 
   const useLLM = llmExtractToggle.checked;
 
@@ -3903,11 +4228,13 @@ async function finishRun(documents, totalPages, selectedAi) {
 
     let rows;
     if (useLLM) {
-      statusEl.textContent = `Extracting ${doc.fileName} with Claude…`;
-      logEl.textContent += `\n→ ${doc.fileName}: extracting with AI (reads the full label and applies extraction-rules.md / derivation-rules.md)…\n`;
+      statusEl.textContent = `Extracting ${doc.fileName} with Claude (extraction → validation → QC → remediation)…`;
+      logEl.textContent += `\n→ ${doc.fileName}: extracting with AI — extraction agent runs first, then an independent QC agent (reads the full label and applies extraction-rules.md / derivation-rules.md)…\n`;
       try {
-        rows = await extractWithLLM(doc);
-        logEl.textContent += `   ${rows.length} use row(s) returned by the model\n`;
+        const result = await extractWithLLM(doc);
+        rows = result.rows;
+        aiQcReports.push({ fileName: doc.fileName, qcReport: result.qcReport });
+        logEl.textContent += `   ${rows.length} use row(s) returned after the full pipeline\n`;
       } catch (err) {
         // Never silently fall back to regex — the user must know which path
         // actually produced (or failed to produce) the rows on screen.
@@ -3956,6 +4283,7 @@ async function finishRun(documents, totalPages, selectedAi) {
   }
 
   window.__useSummaryRows = allRows;
+  window.__aiQcReports = aiQcReports;
 
   // TASK 5 / 10 / 11 — render table, confidence badges and coverage warnings
   searchEl.value = "";
@@ -3975,6 +4303,9 @@ async function finishRun(documents, totalPages, selectedAi) {
   const qcReport = runRuntimeQcGate(allRows, documents, bad);
   qcReport.remediation = remediation;
   renderQcGateReport(qcReport);
+  // Always show results — the LLM QC layer is advisory/informational only,
+  // never blocking, same philosophy as the structural QC gate above.
+  renderAiQcReport(aiQcReports);
 
   statusEl.textContent = qcReport.passed
     ? `Done — ${documents.length} document(s), ${totalPages} page(s), ${allRows.length} row(s).`
