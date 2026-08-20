@@ -3834,6 +3834,33 @@ const MAX_TOKENS = 64000;
 const VALIDATION_MAX_CYCLES = 2;
 const REMEDIATION_MAX_CYCLES = 2;
 
+// Progress-bar step budget per document, sized to the worst-case call count:
+// 1 (extraction) + up to 2 calls per validation cycle (report, then maybe a
+// correction) + 1 (QC) + up to 2 calls per remediation cycle (correction, then
+// a recheck). Real runs usually finish in fewer calls — a clean validation or
+// QC pass skips its correction call — so advanceAiProgress() jumps the bar
+// straight past whatever steps a stage skipped, rather than leaving it stalled
+// at whatever step count the loop happened to exit on.
+const AI_STEPS_PER_DOC = 1 + (VALIDATION_MAX_CYCLES * 2) + 1 + (REMEDIATION_MAX_CYCLES * 2);
+
+// M1 (extended) — during AI extraction, the bar and status/placeholder text
+// track progress across every file and every pipeline stage, not just the
+// initial PDF text read. `pState` is one object per document:
+// { fileIndex, totalFiles, fileName, step, maxSteps }.
+function updateAiProgress(pState, stageLabel) {
+  const step = Math.min(pState.step, pState.maxSteps);
+  const pct = ((pState.fileIndex + step / pState.maxSteps) / pState.totalFiles) * 100;
+  setProgress(pct);
+  const text = `File ${pState.fileIndex + 1} of ${pState.totalFiles} — ${pState.fileName}: ${stageLabel} (${Math.round(Math.max(0, Math.min(100, pct)))}%)`;
+  statusEl.textContent = text;
+  placeholderEl.textContent = text;
+}
+
+function advanceAiProgress(pState, n, stageLabel) {
+  pState.step = Math.min(pState.maxSteps, pState.step + n);
+  updateAiProgress(pState, stageLabel);
+}
+
 function buildRowSchemaTool() {
   const rowProperties = {};
   SCHEMA.forEach(col => {
@@ -4016,21 +4043,24 @@ async function callAnthropic(messages, systemBlocks, tools, toolChoiceName) {
 }
 
 // Stage 1 — extraction agent: read the label, emit the initial row set.
-async function runExtractionTurn(doc, pageMarkedText, systemBlocks, tools) {
+async function runExtractionTurn(doc, pageMarkedText, systemBlocks, tools, pState) {
+  updateAiProgress(pState, "extraction (stage 1/4)");
   const stageText = "Read the entire label above and emit one row per use + use site + application method, per the rules and schema in the system prompt.";
   const messages = [
     { role: "user", content: buildDocMessageBlocks(doc, pageMarkedText, stageText) }
   ];
   const { data, toolUse } = await callAnthropic(messages, systemBlocks, tools, "emit_use_summary_rows");
   messages.push({ role: "assistant", content: data.content });
+  advanceAiProgress(pState, 1, "extraction complete (stage 1/4)");
   return { messages, rawRows: toolUse.input?.rows || [], lastToolUseId: toolUse.id };
 }
 
 // Stage 2 — generation → validation → correction loop, run in the same
 // conversation as extraction so the model can see its own prior reasoning.
-async function runValidationCorrectionLoop(state, systemBlocks, tools) {
+async function runValidationCorrectionLoop(state, systemBlocks, tools, pState) {
   let { messages, rawRows, lastToolUseId } = state;
   for (let cycle = 1; cycle <= VALIDATION_MAX_CYCLES; cycle++) {
+    updateAiProgress(pState, `validating (stage 2/4, cycle ${cycle}/${VALIDATION_MAX_CYCLES})`);
     logEl.textContent += `   validation cycle ${cycle}/${VALIDATION_MAX_CYCLES}…\n`;
     messages.push({
       role: "user",
@@ -4049,9 +4079,15 @@ async function runValidationCorrectionLoop(state, systemBlocks, tools) {
     lastToolUseId = val.toolUse.id;
     if (report.pass || issues.length === 0) {
       logEl.textContent += `   validation cycle ${cycle}: clean.\n`;
+      // No correction call this cycle, and the remaining cycles never run —
+      // jump the bar past every step this early exit skipped.
+      const skipped = 1 + (VALIDATION_MAX_CYCLES - cycle) * 2;
+      advanceAiProgress(pState, skipped, "validation clean (stage 2/4 complete)");
       break;
     }
     logEl.textContent += `   validation cycle ${cycle}: ${issues.length} issue(s) flagged — correcting…\n`;
+    advanceAiProgress(pState, 1, `validation cycle ${cycle}: ${issues.length} issue(s) flagged`);
+    updateAiProgress(pState, `correcting (stage 2/4, cycle ${cycle}/${VALIDATION_MAX_CYCLES})`);
     messages.push({
       role: "user",
       content: [
@@ -4066,13 +4102,15 @@ async function runValidationCorrectionLoop(state, systemBlocks, tools) {
     messages.push({ role: "assistant", content: corr.data.content });
     rawRows = corr.toolUse.input?.rows || rawRows;
     lastToolUseId = corr.toolUse.id;
+    advanceAiProgress(pState, 1, `correction applied (stage 2/4, cycle ${cycle}/${VALIDATION_MAX_CYCLES})`);
   }
   return { messages, rawRows, lastToolUseId };
 }
 
 // Stage 3 — QC agent: a fresh conversation, independent of the extractor's
 // own reasoning, auditing the validated row set against the label text.
-async function runQcTurn(rawRows, doc, pageMarkedText, systemBlocks, tools) {
+async function runQcTurn(rawRows, doc, pageMarkedText, systemBlocks, tools, pState) {
+  updateAiProgress(pState, "independent QC review (stage 3/4)");
   const stageText = [
     "You are now acting as an independent QC reviewer — a senior regulatory manager auditing someone else's extraction, not the person who produced it. Run all 5 passes: structural (schema compliance, no blanks), column-wise plausibility, row-wise verification against the label text above, completeness (every crop/use/method the label states, R-17/R-21/R-25), and confidence calibration.",
     "The candidate row set to review (JSON, 0-based indices):",
@@ -4083,18 +4121,20 @@ async function runQcTurn(rawRows, doc, pageMarkedText, systemBlocks, tools) {
   ];
   const { data, toolUse } = await callAnthropic(messages, systemBlocks, tools, "emit_qc_report");
   messages.push({ role: "assistant", content: data.content });
+  advanceAiProgress(pState, 1, "QC review complete (stage 3/4)");
   return { messages, qcReport: toolUse.input || { overall: "Clean", defects: [] }, lastToolUseId: toolUse.id };
 }
 
 // Stage 4 — bounded remediation loop: only engages when QC found Critical/
 // High defects, and never blocks — whatever the final QC report says, rows
 // and report both flow through to rendering/export (see finishRun).
-async function runRemediationLoop(state, rawRows, systemBlocks, tools) {
+async function runRemediationLoop(state, rawRows, systemBlocks, tools, pState) {
   let { messages, qcReport, lastToolUseId } = state;
   let cycle = 0;
   const needsFix = r => r && (r.overall === "Critical" || r.overall === "High");
   while (needsFix(qcReport) && cycle < REMEDIATION_MAX_CYCLES) {
     cycle++;
+    updateAiProgress(pState, `remediating (stage 4/4, cycle ${cycle}/${REMEDIATION_MAX_CYCLES})`);
     logEl.textContent += `   remediation cycle ${cycle}/${REMEDIATION_MAX_CYCLES}: ${(qcReport.defects || []).length} defect(s) (${qcReport.overall}) — correcting…\n`;
     messages.push({
       role: "user",
@@ -4109,7 +4149,9 @@ async function runRemediationLoop(state, rawRows, systemBlocks, tools) {
     const corr = await callAnthropic(messages, systemBlocks, tools, "emit_use_summary_rows");
     messages.push({ role: "assistant", content: corr.data.content });
     rawRows = corr.toolUse.input?.rows || rawRows;
+    advanceAiProgress(pState, 1, `remediation correction applied (stage 4/4, cycle ${cycle}/${REMEDIATION_MAX_CYCLES})`);
 
+    updateAiProgress(pState, `QC recheck (stage 4/4, cycle ${cycle}/${REMEDIATION_MAX_CYCLES})`);
     messages.push({
       role: "user",
       content: [
@@ -4121,6 +4163,13 @@ async function runRemediationLoop(state, rawRows, systemBlocks, tools) {
     messages.push({ role: "assistant", content: recheck.data.content });
     qcReport = recheck.toolUse.input || qcReport;
     lastToolUseId = recheck.toolUse.id;
+    advanceAiProgress(pState, 1, `QC recheck complete (stage 4/4, cycle ${cycle}/${REMEDIATION_MAX_CYCLES})`);
+  }
+  // Remediation never engaged, or exited before exhausting its cycle budget —
+  // jump the bar past whatever remediation steps were skipped.
+  const skipped = (REMEDIATION_MAX_CYCLES - cycle) * 2;
+  if (skipped > 0) {
+    advanceAiProgress(pState, skipped, cycle > 0 ? "remediation complete (stage 4/4)" : "remediation not needed (stage 4/4)");
   }
   logEl.textContent += cycle > 0
     ? `   remediation complete after ${cycle} cycle(s) — final QC status: ${qcReport.overall}.\n`
@@ -4171,7 +4220,7 @@ function buildAppRows(rawRows, doc) {
 // behavior specified in .github/agents/orchestrator.agent.md /
 // extraction-main.agent.md / QC-agent.agent.md, ported into this app's
 // actual runtime path instead of a manually-driven Copilot Chat session.
-async function extractWithLLM(doc) {
+async function extractWithLLM(doc, pState) {
   const pageMarkedText = doc.pages
     .map((text, i) => `--- PAGE ${i + 1} ---\n${text}`)
     .join("\n\n");
@@ -4186,17 +4235,22 @@ async function extractWithLLM(doc) {
   const tools = buildTools();
 
   logEl.textContent += `   stage 1/4 — extraction…\n`;
-  const extraction = await runExtractionTurn(doc, pageMarkedText, systemBlocks, tools);
+  const extraction = await runExtractionTurn(doc, pageMarkedText, systemBlocks, tools, pState);
   logEl.textContent += `   ${extraction.rawRows.length} row(s) from initial extraction\n`;
 
   logEl.textContent += `   stage 2/4 — validate & correct (up to ${VALIDATION_MAX_CYCLES} cycle(s))…\n`;
-  const validated = await runValidationCorrectionLoop(extraction, systemBlocks, tools);
+  const validated = await runValidationCorrectionLoop(extraction, systemBlocks, tools, pState);
 
   logEl.textContent += `   stage 3/4 — independent QC review…\n`;
-  const qc = await runQcTurn(validated.rawRows, doc, pageMarkedText, systemBlocks, tools);
+  const qc = await runQcTurn(validated.rawRows, doc, pageMarkedText, systemBlocks, tools, pState);
 
   logEl.textContent += `   stage 4/4 — bounded remediation (up to ${REMEDIATION_MAX_CYCLES} cycle(s))…\n`;
-  const remediated = await runRemediationLoop(qc, validated.rawRows, systemBlocks, tools);
+  const remediated = await runRemediationLoop(qc, validated.rawRows, systemBlocks, tools, pState);
+
+  // Snap to exactly this file's share of the overall bar, regardless of any
+  // drift from the step-budget approximations above.
+  pState.step = pState.maxSteps;
+  updateAiProgress(pState, "file complete");
 
   const rows = buildAppRows(remediated.rawRows, doc);
   return { rows, qcReport: remediated.qcReport };
@@ -4216,7 +4270,15 @@ async function finishRun(documents, totalPages, selectedAi) {
 
   const useLLM = llmExtractToggle.checked;
 
-  for (const doc of documents) {
+  // This is a new progress phase, distinct from the PDF-text-read phase that
+  // already ran the bar up to 100% — reset it so the bar (and the status /
+  // placeholder text the user is watching) reflect this phase's own progress
+  // instead of sitting frozen at the previous phase's finish line.
+  barEl.style.display = "block";
+  setProgress(0);
+
+  for (let docIndex = 0; docIndex < documents.length; docIndex++) {
+    const doc = documents[docIndex];
     doc.selectedAi = selectedAi;
     // Clear the whole doc.__* cache group, not just the two that obviously
     // depend on the active ingredient — see the convention note above.
@@ -4228,10 +4290,11 @@ async function finishRun(documents, totalPages, selectedAi) {
 
     let rows;
     if (useLLM) {
-      statusEl.textContent = `Extracting ${doc.fileName} with Claude (extraction → validation → QC → remediation)…`;
+      const pState = { fileIndex: docIndex, totalFiles: documents.length, fileName: doc.fileName, step: 0, maxSteps: AI_STEPS_PER_DOC };
+      updateAiProgress(pState, "starting");
       logEl.textContent += `\n→ ${doc.fileName}: extracting with AI — extraction agent runs first, then an independent QC agent (reads the full label and applies extraction-rules.md / derivation-rules.md)…\n`;
       try {
-        const result = await extractWithLLM(doc);
+        const result = await extractWithLLM(doc, pState);
         rows = result.rows;
         aiQcReports.push({ fileName: doc.fileName, qcReport: result.qcReport });
         logEl.textContent += `   ${rows.length} use row(s) returned after the full pipeline\n`;
@@ -4240,6 +4303,8 @@ async function finishRun(documents, totalPages, selectedAi) {
         // actually produced (or failed to produce) the rows on screen.
         console.error(err);
         logEl.textContent += `✖ ${doc.fileName}: AI extraction failed — ${err.message}\n`;
+        pState.step = pState.maxSteps;
+        updateAiProgress(pState, "AI extraction failed");
         const fallback = blankRow();
         fallback["Additional Information"] = `AI extraction failed: ${err.message}`;
         fallback["Page"] = "1";
@@ -4260,6 +4325,7 @@ async function finishRun(documents, totalPages, selectedAi) {
       rows = parseDocument(doc);
       logEl.textContent += `\n→ ${doc.fileName}: ${rows.length} use row(s) parsed\n`;
       logEl.textContent += `   section detectors: ${Object.entries(byDetector).map(([k, n]) => `${k}=${n}`).join(", ") || "none"}\n`;
+      setProgress(((docIndex + 1) / documents.length) * 100);
     }
 
     allRows.push(...rows);
