@@ -1,12 +1,17 @@
 // Ported, trimmed copy of the AI extraction pipeline from app/index.html
 // (not a shared import — that file is one inline <script>, not a module).
 // Source line numbers below are from app/index.html as of the port (2026-09):
-// buildRowSchemaTool ~3872, buildValidationReportTool ~3907, buildQcReportTool
-// ~3933, buildTools ~3964, buildSystemBlocks ~3980, buildDocMessageBlocks
-// ~4005, callAnthropic ~4017, runExtractionTurn ~4054,
-// runValidationCorrectionLoop ~4068, runQcTurn ~4120, runRemediationLoop
-// ~4139, buildAppRows ~4193, extractWithLLM ~4231. SCHEMA ~519, NOT_SPECIFIED
-// ~555, KEY_FIELDS ~1791, scoreRow ~1799, blankRow ~624.
+// buildRowSchemaTool ~3872, buildQcReportTool ~3933, buildTools ~3964,
+// buildSystemBlocks ~3980, buildDocMessageBlocks ~4005, callAnthropic ~4017,
+// runExtractionTurn ~4054, runQcTurn ~4120, runRemediationLoop ~4139,
+// buildAppRows ~4193, extractWithLLM ~4231. SCHEMA ~519, NOT_SPECIFIED ~555,
+// KEY_FIELDS ~1791, scoreRow ~1799, blankRow ~624.
+//
+// The self-validation stage (extraction agent checking its own work in the
+// same conversation) was removed 2026-09 — one independent QC pass (a fresh
+// conversation with no priming from the extraction reasoning) plus its own
+// bounded remediation loop was judged enough; running both back-to-back was
+// redundant and doubled LLM calls per document for little extra signal.
 //
 // Differences from the browser version, all confirmed necessary by direct
 // inspection of the source (nothing else in these functions touches
@@ -35,7 +40,6 @@ import {
 
 const MGA_UPSTREAM = "https://chat.int.bayer.com/anthropic/v1/messages";
 const MAX_TOKENS = 64000;
-const VALIDATION_MAX_CYCLES = 2;
 const REMEDIATION_MAX_CYCLES = 2;
 const MAX_CHARS = 150000;
 export const JOB_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -182,32 +186,6 @@ function buildRowSchemaTool() {
   };
 }
 
-function buildValidationReportTool() {
-  return {
-    name: "emit_validation_report",
-    description: "Report the result of validating the current row set against Pass A (completeness) and Pass B (field fidelity). Report only — do not correct rows in this call.",
-    input_schema: {
-      type: "object",
-      properties: {
-        pass: { type: "boolean", description: "true only if both Pass A and Pass B found nothing to flag." },
-        issues: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              row_index: { type: "integer", description: "0-based index into the current row set this issue applies to, or -1 for a missing-row completeness gap." },
-              column: { type: "string", description: "Schema column name this issue concerns, or \"(missing row)\" for a completeness gap." },
-              issue: { type: "string", description: "What is wrong, and what the label actually states, so it can be corrected." }
-            },
-            required: ["row_index", "column", "issue"]
-          }
-        }
-      },
-      required: ["pass", "issues"]
-    }
-  };
-}
-
 function buildQcReportTool() {
   return {
     name: "emit_qc_report",
@@ -240,7 +218,13 @@ function buildQcReportTool() {
 }
 
 function buildTools() {
-  return [buildRowSchemaTool(), buildValidationReportTool(), buildQcReportTool()];
+  // Both tool schemas are sent on every call, regardless of stage —
+  // tool_choice forces which one actually fires. Keeping the tools array
+  // byte-identical across every call in the pipeline (extraction, QC,
+  // remediation) is what lets the knowledge-block cache breakpoint below
+  // survive across stages instead of invalidating every time the forced
+  // tool changes.
+  return [buildRowSchemaTool(), buildQcReportTool()];
 }
 
 function buildSystemBlocks() {
@@ -332,7 +316,7 @@ async function callAnthropic(env, messages, systemBlocks, tools, toolChoiceName)
 
 // Stage 1 — extraction agent: read the label, emit the initial row set.
 async function runExtractionTurn(env, jobId, fileIndex, doc, pageMarkedText, systemBlocks, tools) {
-  await reportStage(env, jobId, fileIndex, "extraction (stage 1/4)");
+  await reportStage(env, jobId, fileIndex, "extraction (stage 1/3)");
   const stageText = "Read the entire label above and emit one row per use + use site + application method, per the rules and schema in the system prompt.";
   const messages = [
     { role: "user", content: buildDocMessageBlocks(doc, pageMarkedText, stageText) }
@@ -342,55 +326,10 @@ async function runExtractionTurn(env, jobId, fileIndex, doc, pageMarkedText, sys
   return { messages, rawRows: toolUse.input?.rows || [], lastToolUseId: toolUse.id };
 }
 
-// Stage 2 — generation → validation → correction loop, run in the same
-// conversation as extraction so the model can see its own prior reasoning.
-async function runValidationCorrectionLoop(env, jobId, fileIndex, state, systemBlocks, tools) {
-  let { messages, rawRows, lastToolUseId } = state;
-  for (let cycle = 1; cycle <= VALIDATION_MAX_CYCLES; cycle++) {
-    await reportStage(env, jobId, fileIndex, `validating (stage 2/4, cycle ${cycle}/${VALIDATION_MAX_CYCLES})`);
-    messages.push({
-      role: "user",
-      content: [
-        { type: "tool_result", tool_use_id: lastToolUseId, content: "Received." },
-        {
-          type: "text",
-          text: "Run Pass A (completeness — every crop/use-site/method variation the label states, R-17/R-21/R-25) and Pass B (field fidelity — App. Type/Timing/Equipment wording, rate ceiling vs. annual cap, PHI/REI, NS vs. NA, per R-18/R-19/R-20/R-23/R-24) against the current rows. Report every issue found; do not correct anything in this call."
-        }
-      ]
-    });
-    const val = await callAnthropic(env, messages, systemBlocks, tools, "emit_validation_report");
-    messages.push({ role: "assistant", content: val.data.content });
-    const report = val.toolUse.input || {};
-    const issues = report.issues || [];
-    lastToolUseId = val.toolUse.id;
-    if (report.pass || issues.length === 0) {
-      console.log(`validation cycle ${cycle}: clean.`);
-      break;
-    }
-    console.log(`validation cycle ${cycle}: ${issues.length} issue(s) flagged — correcting…`);
-    await reportStage(env, jobId, fileIndex, `correcting (stage 2/4, cycle ${cycle}/${VALIDATION_MAX_CYCLES})`);
-    messages.push({
-      role: "user",
-      content: [
-        { type: "tool_result", tool_use_id: lastToolUseId, content: "Received." },
-        {
-          type: "text",
-          text: `Correct the rows to resolve every issue below, then re-emit the complete corrected row set (not just the changed rows):\n${JSON.stringify(issues)}`
-        }
-      ]
-    });
-    const corr = await callAnthropic(env, messages, systemBlocks, tools, "emit_use_summary_rows");
-    messages.push({ role: "assistant", content: corr.data.content });
-    rawRows = corr.toolUse.input?.rows || rawRows;
-    lastToolUseId = corr.toolUse.id;
-  }
-  return { messages, rawRows, lastToolUseId };
-}
-
-// Stage 3 — QC agent: a fresh conversation, independent of the extractor's
-// own reasoning, auditing the validated row set against the label text.
+// Stage 2 — QC agent: a fresh conversation, independent of the extractor's
+// own reasoning, auditing the initial row set against the label text.
 async function runQcTurn(env, jobId, fileIndex, rawRows, doc, pageMarkedText, systemBlocks, tools) {
-  await reportStage(env, jobId, fileIndex, "independent QC review (stage 3/4)");
+  await reportStage(env, jobId, fileIndex, "independent QC review (stage 2/3)");
   const stageText = [
     "You are now acting as an independent QC reviewer — a senior regulatory manager auditing someone else's extraction, not the person who produced it. Run all 5 passes: structural (schema compliance, no blanks), column-wise plausibility, row-wise verification against the label text above, completeness (every crop/use/method the label states, R-17/R-21/R-25), and confidence calibration.",
     "The candidate row set to review (JSON, 0-based indices):",
@@ -404,7 +343,7 @@ async function runQcTurn(env, jobId, fileIndex, rawRows, doc, pageMarkedText, sy
   return { messages, qcReport: toolUse.input || { overall: "Clean", defects: [] }, lastToolUseId: toolUse.id };
 }
 
-// Stage 4 — bounded remediation loop: only engages when QC found Critical/
+// Stage 3 — bounded remediation loop: only engages when QC found Critical/
 // High defects, and never blocks — whatever the final QC report says, rows
 // and report both flow through to the result written to KV.
 async function runRemediationLoop(env, jobId, fileIndex, state, rawRows, systemBlocks, tools) {
@@ -413,7 +352,7 @@ async function runRemediationLoop(env, jobId, fileIndex, state, rawRows, systemB
   const needsFix = r => r && (r.overall === "Critical" || r.overall === "High");
   while (needsFix(qcReport) && cycle < REMEDIATION_MAX_CYCLES) {
     cycle++;
-    await reportStage(env, jobId, fileIndex, `remediating (stage 4/4, cycle ${cycle}/${REMEDIATION_MAX_CYCLES})`);
+    await reportStage(env, jobId, fileIndex, `remediating (stage 3/3, cycle ${cycle}/${REMEDIATION_MAX_CYCLES})`);
     console.log(`remediation cycle ${cycle}/${REMEDIATION_MAX_CYCLES}: ${(qcReport.defects || []).length} defect(s) (${qcReport.overall}) — correcting…`);
     messages.push({
       role: "user",
@@ -429,7 +368,7 @@ async function runRemediationLoop(env, jobId, fileIndex, state, rawRows, systemB
     messages.push({ role: "assistant", content: corr.data.content });
     rawRows = corr.toolUse.input?.rows || rawRows;
 
-    await reportStage(env, jobId, fileIndex, `QC recheck (stage 4/4, cycle ${cycle}/${REMEDIATION_MAX_CYCLES})`);
+    await reportStage(env, jobId, fileIndex, `QC recheck (stage 3/3, cycle ${cycle}/${REMEDIATION_MAX_CYCLES})`);
     messages.push({
       role: "user",
       content: [
@@ -497,18 +436,15 @@ export async function extractWithLLM(env, jobId, fileIndex, doc, pageMarkedText)
   const systemBlocks = buildSystemBlocks();
   const tools = buildTools();
 
-  console.log(`${doc.fileName} — stage 1/4 — extraction…`);
+  console.log(`${doc.fileName} — stage 1/3 — extraction…`);
   const extraction = await runExtractionTurn(env, jobId, fileIndex, doc, pageMarkedText, systemBlocks, tools);
   console.log(`${doc.fileName} — ${extraction.rawRows.length} row(s) from initial extraction`);
 
-  console.log(`${doc.fileName} — stage 2/4 — validate & correct (up to ${VALIDATION_MAX_CYCLES} cycle(s))…`);
-  const validated = await runValidationCorrectionLoop(env, jobId, fileIndex, extraction, systemBlocks, tools);
+  console.log(`${doc.fileName} — stage 2/3 — independent QC review…`);
+  const qc = await runQcTurn(env, jobId, fileIndex, extraction.rawRows, doc, pageMarkedText, systemBlocks, tools);
 
-  console.log(`${doc.fileName} — stage 3/4 — independent QC review…`);
-  const qc = await runQcTurn(env, jobId, fileIndex, validated.rawRows, doc, pageMarkedText, systemBlocks, tools);
-
-  console.log(`${doc.fileName} — stage 4/4 — bounded remediation (up to ${REMEDIATION_MAX_CYCLES} cycle(s))…`);
-  const remediated = await runRemediationLoop(env, jobId, fileIndex, qc, validated.rawRows, systemBlocks, tools);
+  console.log(`${doc.fileName} — stage 3/3 — bounded remediation (up to ${REMEDIATION_MAX_CYCLES} cycle(s))…`);
+  const remediated = await runRemediationLoop(env, jobId, fileIndex, qc, extraction.rawRows, systemBlocks, tools);
 
   const rows = buildAppRows(remediated.rawRows, doc);
   return { rows, qcReport: remediated.qcReport };
