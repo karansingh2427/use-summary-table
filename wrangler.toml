@@ -15,7 +15,7 @@ compatibility_date = "2026-09-02"
 
 [[kv_namespaces]]
 binding = "JOBS"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "b5b4ba306a6b4539878eca9c4193556b"
 
 # Pages Functions can only produce to a queue, never consume — the consumer
 # is the standalone Worker in worker/.
