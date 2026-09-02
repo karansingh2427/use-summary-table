@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """
-Sync knowledge files into app/index.html
+Sync knowledge files into app/index.html and knowledge/compiled/knowledge-compiled.json
 
-The app embeds knowledge files as JS string constants so it can pass them
-to the LLM without needing a backend. This script keeps them in sync.
+The browser app embeds knowledge files as JS string constants so it can pass
+them to the LLM without needing a backend. The background-job Worker
+(worker/src/knowledge.js) has no inline <script> to embed into, so it reads
+the same content from the compiled JSON instead — one generation step, one
+source of truth for both. This script keeps all of it in sync.
 
 Run: python3 scripts/sync-knowledge.py
 """
 
+import json
 import os
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 APP_FILE = ROOT / 'app' / 'index.html'
+COMPILED_FILE = ROOT / 'knowledge' / 'compiled' / 'knowledge-compiled.json'
 
 # Read knowledge files
 EXTRACTION_RULES = (ROOT / 'knowledge' / 'extraction-rules.md').read_text('utf-8')
@@ -75,3 +80,17 @@ if changes_made > 0:
     print('   Commit the updated app/index.html to deploy the changes.')
 else:
     print('\n✓ All knowledge files already in sync')
+
+# Compiled JSON module for the background-job Worker (worker/src/knowledge.js) —
+# same raw content as above, no JS-string escaping needed since this is real JSON.
+compiled = {name: content for name, content in replacements}
+new_compiled_text = json.dumps(compiled, indent=2, ensure_ascii=False) + '\n'
+
+old_compiled_text = COMPILED_FILE.read_text('utf-8') if COMPILED_FILE.exists() else None
+if old_compiled_text != new_compiled_text:
+    COMPILED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    COMPILED_FILE.write_text(new_compiled_text, 'utf-8')
+    print(f'✅ Wrote {COMPILED_FILE.relative_to(ROOT)}')
+    print('   Commit this alongside app/index.html.')
+else:
+    print(f'✓ {COMPILED_FILE.relative_to(ROOT)} already in sync')
