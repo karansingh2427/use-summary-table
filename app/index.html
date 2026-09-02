@@ -4084,11 +4084,15 @@ function buildDocMessageBlocks(doc, pageMarkedText, stageInstructionText) {
 
 // mGA (and whatever sits in front of it) occasionally times out or bounces a
 // request under load — 524/502/503/429 are all transient, not a real
-// rejection of this request, so a short retry clears most of them without
-// forcing the user to restart the whole run. 4xx other than 429 (e.g. 401)
-// is not retried — retrying a bad-token error just wastes 3x the time failing.
+// rejection of this request, so a retry clears most of them without forcing
+// the user to restart the whole run. 4xx other than 429 (e.g. 401) is not
+// retried — retrying a bad-token error just wastes attempts failing the same
+// way. MAX_ATTEMPTS=5 with delays of 2s/4s/6s/8s between attempts (~20s of
+// total cushion) — sized up from an original 3-attempt/~6s budget after a
+// real job still hit a 524 on every attempt within that shorter window,
+// meaning the outage it hit outlasted 6s.
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 524]);
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 5;
 const RETRY_BASE_DELAY_MS = 2000;
 
 function sleep(ms) {
