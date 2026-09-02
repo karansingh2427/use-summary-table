@@ -1,0 +1,24 @@
+# Bindings for the existing Cloudflare Pages project (app/index.html +
+# functions/api/*) — adds KV + a queue *producer* only. This file does
+# nothing to the live site until the "v2 build system" is turned on for
+# this Pages project (Settings -> Builds -> Build system version) — Pages
+# silently ignores wrangler.toml without it, so committing/pushing this on
+# its own is safe. See the background-job plan for the full picture; the
+# consumer lives in the separate worker/ project (worker/wrangler.toml).
+#
+# Fill in the KV namespace id below after creating it in the dashboard
+# (Workers & Pages -> KV -> Create namespace).
+
+name = "use-summary-table"
+pages_build_output_dir = "./app"
+compatibility_date = "2026-09-02"
+
+[[kv_namespaces]]
+binding = "JOBS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Pages Functions can only produce to a queue, never consume — the consumer
+# is the standalone Worker in worker/.
+[[queues.producers]]
+binding = "JOBS_QUEUE"
+queue = "use-summary-jobs"
