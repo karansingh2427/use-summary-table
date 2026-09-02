@@ -1,0 +1,30 @@
+# Standalone Cloudflare Worker — consumes the "use-summary-jobs" queue and
+# runs the AI extraction pipeline server-side. This is a SEPARATE deployable
+# from the main Pages project (app/ + functions/api/*), which is untouched.
+# See the background-job plan for the full picture; the producer side lives
+# in the root wrangler.toml + functions/api/jobs.js.
+#
+# Setup this project needs in the Cloudflare dashboard before it can run
+# (none of this can be done from the repo):
+#   1. Deploy this project (Workers Builds git integration with root
+#      directory "worker/", or manual `wrangler deploy` from this folder).
+#   2. Set MGA_TOKEN as an encrypted secret on THIS Worker project (separate
+#      secret store from the Pages project's copy, even though it's the same
+#      token value): `wrangler secret put MGA_TOKEN` from this folder.
+#   3. Bind the same KV namespace used by the Pages project (fill in the id
+#      below).
+#   4. Confirm the queue consumer binding below took effect after first
+#      deploy (Workers & Pages -> this project -> Settings -> Triggers).
+
+name = "use-summary-jobs-worker"
+main = "src/index.js"
+compatibility_date = "2026-09-02"
+
+[[kv_namespaces]]
+binding = "JOBS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[[queues.consumers]]
+queue = "use-summary-jobs"
+max_batch_size = 1
+max_concurrency = 2
