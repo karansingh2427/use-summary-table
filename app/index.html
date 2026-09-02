@@ -4110,24 +4110,45 @@ function buildDocMessageBlocks(doc, pageMarkedText, stageInstructionText) {
   return blocks;
 }
 
+// mGA (and whatever sits in front of it) occasionally times out or bounces a
+// request under load — 524/502/503/429 are all transient, not a real
+// rejection of this request, so a short retry clears most of them without
+// forcing the user to restart the whole run. 4xx other than 429 (e.g. 401)
+// is not retried — retrying a bad-token error just wastes 3x the time failing.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 524]);
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 2000;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function callAnthropic(messages, systemBlocks, tools, toolChoiceName) {
-  const response = await fetch(RELAY_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      // A static pilot-gate header, not a secret — deters scanners from
-      // hitting the public relay endpoint, since it proxies to a metered API.
-      "x-ust-pilot": PILOT_GATE_HEADER_VALUE
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-5",
-      max_tokens: MAX_TOKENS,
-      system: systemBlocks,
-      messages,
-      tools,
-      tool_choice: { type: "tool", name: toolChoiceName }
-    })
+  const body = JSON.stringify({
+    model: "claude-sonnet-5",
+    max_tokens: MAX_TOKENS,
+    system: systemBlocks,
+    messages,
+    tools,
+    tool_choice: { type: "tool", name: toolChoiceName }
   });
+
+  let response;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    response = await fetch(RELAY_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // A static pilot-gate header, not a secret — deters scanners from
+        // hitting the public relay endpoint, since it proxies to a metered API.
+        "x-ust-pilot": PILOT_GATE_HEADER_VALUE
+      },
+      body
+    });
+    if (response.ok || !RETRYABLE_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) break;
+    logEl.textContent += `   ⚠ mGA request got ${response.status} (attempt ${attempt}/${MAX_ATTEMPTS}) — retrying…\n`;
+    await sleep(RETRY_BASE_DELAY_MS * attempt);
+  }
 
   if (!response.ok) {
     let detail = "";

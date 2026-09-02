@@ -276,23 +276,44 @@ function buildDocMessageBlocks(doc, pageMarkedText, stageInstructionText) {
   return blocks;
 }
 
+// mGA (and whatever sits in front of it) occasionally times out or bounces a
+// request under load — 524/502/503/429 are all transient, not a real
+// rejection of this request, so a short retry clears most of them without
+// forcing a full job re-submission. 4xx other than 429 (e.g. 401) is not
+// retried — retrying a bad-token error just wastes 3x the time failing.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 524]);
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 2000;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function callAnthropic(env, messages, systemBlocks, tools, toolChoiceName) {
-  const response = await fetch(MGA_UPSTREAM, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "authorization": `Bearer ${env.MGA_TOKEN}`,
-      "anthropic-version": "2023-06-01"
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-5",
-      max_tokens: MAX_TOKENS,
-      system: systemBlocks,
-      messages,
-      tools,
-      tool_choice: { type: "tool", name: toolChoiceName }
-    })
+  const body = JSON.stringify({
+    model: "claude-sonnet-5",
+    max_tokens: MAX_TOKENS,
+    system: systemBlocks,
+    messages,
+    tools,
+    tool_choice: { type: "tool", name: toolChoiceName }
   });
+
+  let response;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    response = await fetch(MGA_UPSTREAM, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${env.MGA_TOKEN}`,
+        "anthropic-version": "2023-06-01"
+      },
+      body
+    });
+    if (response.ok || !RETRYABLE_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) break;
+    console.warn(`mGA request got ${response.status} (attempt ${attempt}/${MAX_ATTEMPTS}) — retrying…`);
+    await sleep(RETRY_BASE_DELAY_MS * attempt);
+  }
 
   if (!response.ok) {
     let detail = "";
