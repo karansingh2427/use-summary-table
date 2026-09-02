@@ -3846,10 +3846,18 @@ const AI_STEPS_PER_DOC = 1 + (VALIDATION_MAX_CYCLES * 2) + 1 + (REMEDIATION_MAX_
 // M1 (extended) — during AI extraction, the bar and status/placeholder text
 // track progress across every file and every pipeline stage, not just the
 // initial PDF text read. `pState` is one object per document:
-// { fileIndex, totalFiles, fileName, step, maxSteps }.
+// { fileIndex, totalFiles, fileName, step, maxSteps, pool }, where `pool` is
+// the shared array of every document's pState in this run. Documents now run
+// several at a time (see EXTRACTION_CONCURRENCY in finishRun()), so the bar
+// can't assume "this file's slot, plus how far it's gotten" the way a purely
+// sequential run could — two files can advance in either order. Instead the
+// overall percentage is the sum of every file's own fractional completion,
+// divided by the file count, which stays correct and monotonic no matter
+// which file's update happens to land next.
 function updateAiProgress(pState, stageLabel) {
-  const step = Math.min(pState.step, pState.maxSteps);
-  const pct = ((pState.fileIndex + step / pState.maxSteps) / pState.totalFiles) * 100;
+  const pool = pState.pool || [pState];
+  const overallFrac = pool.reduce((acc, p) => acc + Math.min(p.step, p.maxSteps) / p.maxSteps, 0) / pool.length;
+  const pct = overallFrac * 100;
   setProgress(pct);
   const text = `File ${pState.fileIndex + 1} of ${pState.totalFiles} — ${pState.fileName}: ${stageLabel} (${Math.round(Math.max(0, Math.min(100, pct)))}%)`;
   statusEl.textContent = text;
@@ -4277,8 +4285,22 @@ async function finishRun(documents, totalPages, selectedAi) {
   barEl.style.display = "block";
   setProgress(0);
 
-  for (let docIndex = 0; docIndex < documents.length; docIndex++) {
-    const doc = documents[docIndex];
+  // How many documents' AI pipelines run at once. Each document's own
+  // extraction -> validate -> QC -> remediate conversation is still strictly
+  // sequential (it's one multi-turn conversation), but different documents'
+  // conversations are independent, so a batch of files no longer has to wait
+  // for file 1 to fully finish before file 2 even starts. Capped rather than
+  // unbounded so a large batch doesn't throw every request at the mGA relay
+  // at once.
+  const EXTRACTION_CONCURRENCY = 3;
+
+  // Results are collected here (indexed by original position) instead of
+  // pushed straight into allRows as each document finishes, so the exported
+  // table's row order still matches the upload order regardless of which
+  // file's pipeline happens to finish first.
+  const results = new Array(documents.length);
+
+  function prepDoc(doc) {
     doc.selectedAi = selectedAi;
     // Clear the whole doc.__* cache group, not just the two that obviously
     // depend on the active ingredient — see the convention note above.
@@ -4287,46 +4309,75 @@ async function finishRun(documents, totalPages, selectedAi) {
     doc.__ppe    = undefined;
     doc.__equip  = undefined;
     doc.__physicalForm = undefined;
+  }
 
-    let rows;
-    if (useLLM) {
-      const pState = { fileIndex: docIndex, totalFiles: documents.length, fileName: doc.fileName, step: 0, maxSteps: AI_STEPS_PER_DOC };
-      updateAiProgress(pState, "starting");
-      logEl.textContent += `\n→ ${doc.fileName}: extracting with AI — extraction agent runs first, then an independent QC agent (reads the full label and applies extraction-rules.md / derivation-rules.md)…\n`;
-      try {
-        const result = await extractWithLLM(doc, pState);
-        rows = result.rows;
-        aiQcReports.push({ fileName: doc.fileName, qcReport: result.qcReport });
-        logEl.textContent += `   ${rows.length} use row(s) returned after the full pipeline\n`;
-      } catch (err) {
-        // Never silently fall back to regex — the user must know which path
-        // actually produced (or failed to produce) the rows on screen.
-        console.error(err);
-        logEl.textContent += `✖ ${doc.fileName}: AI extraction failed — ${err.message}\n`;
-        pState.step = pState.maxSteps;
-        updateAiProgress(pState, "AI extraction failed");
-        const fallback = blankRow();
-        fallback["Additional Information"] = `AI extraction failed: ${err.message}`;
-        fallback["Page"] = "1";
-        fallback["Confidence"] = "Low";
-        fallback["Source File"] = doc.fileName;
-        fallback.__source = "";
-        fallback.__derived = {};
-        fallback.__id = `${doc.fileName}#0`;
-        rows = [fallback];
+  if (useLLM) {
+    // Shared across every document's pState so the bar can sum fractional
+    // progress across all of them — see the comment on updateAiProgress().
+    const pool = documents.map((doc, i) => ({
+      fileIndex: i, totalFiles: documents.length, fileName: doc.fileName,
+      step: 0, maxSteps: AI_STEPS_PER_DOC, pool: null
+    }));
+    pool.forEach(p => { p.pool = pool; });
+
+    let nextIndex = 0;
+    async function worker() {
+      while (nextIndex < documents.length) {
+        const docIndex = nextIndex++;
+        const doc = documents[docIndex];
+        prepDoc(doc);
+        const pState = pool[docIndex];
+        updateAiProgress(pState, "starting");
+        logEl.textContent += `\n→ ${doc.fileName}: extracting with AI — extraction agent runs first, then an independent QC agent (reads the full label and applies extraction-rules.md / derivation-rules.md)…\n`;
+        try {
+          const result = await extractWithLLM(doc, pState);
+          logEl.textContent += `   ${doc.fileName}: ${result.rows.length} use row(s) returned after the full pipeline\n`;
+          results[docIndex] = { rows: result.rows, qcReport: result.qcReport };
+        } catch (err) {
+          // Never silently fall back to regex — the user must know which path
+          // actually produced (or failed to produce) the rows on screen.
+          console.error(err);
+          logEl.textContent += `✖ ${doc.fileName}: AI extraction failed — ${err.message}\n`;
+          pState.step = pState.maxSteps;
+          updateAiProgress(pState, "AI extraction failed");
+          const fallback = blankRow();
+          fallback["Additional Information"] = `AI extraction failed: ${err.message}`;
+          fallback["Page"] = "1";
+          fallback["Confidence"] = "Low";
+          fallback["Source File"] = doc.fileName;
+          fallback.__source = "";
+          fallback.__derived = {};
+          fallback.__id = `${doc.fileName}#0`;
+          results[docIndex] = { rows: [fallback], qcReport: null };
+        }
       }
-    } else {
+    }
+    await Promise.all(Array.from({ length: Math.min(EXTRACTION_CONCURRENCY, documents.length) }, worker));
+  } else {
+    // The regex/heuristic path is synchronous CPU work, not network I/O, so
+    // running it "concurrently" on JS's single thread wouldn't save any wall
+    // time — it stays a plain sequential loop.
+    for (let docIndex = 0; docIndex < documents.length; docIndex++) {
+      const doc = documents[docIndex];
+      prepDoc(doc);
       const sections = findUseSections(doc.fullText);
       const byDetector = sections.reduce((acc, s) => {
         const k = s.detector || "unknown";
         acc[k] = (acc[k] || 0) + 1;
         return acc;
       }, {});
-      rows = parseDocument(doc);
+      const rows = parseDocument(doc);
       logEl.textContent += `\n→ ${doc.fileName}: ${rows.length} use row(s) parsed\n`;
       logEl.textContent += `   section detectors: ${Object.entries(byDetector).map(([k, n]) => `${k}=${n}`).join(", ") || "none"}\n`;
       setProgress(((docIndex + 1) / documents.length) * 100);
+      results[docIndex] = { rows, qcReport: null };
     }
+  }
+
+  for (let docIndex = 0; docIndex < documents.length; docIndex++) {
+    const doc = documents[docIndex];
+    const { rows, qcReport } = results[docIndex];
+    if (qcReport) aiQcReports.push({ fileName: doc.fileName, qcReport });
 
     allRows.push(...rows);
     if (selectedAi) {
