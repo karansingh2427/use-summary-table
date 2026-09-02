@@ -4535,14 +4535,9 @@ async function finishRun(documents, totalPages, selectedAi) {
   noticeEl.classList.toggle("error", !qcReport.passed);
   if (bad.length) console.warn("[Extractor] non-compliant rows", bad);
   noticeEl.style.display = "flex";
-  // Always show results — QC defects are informational, not blocking.
-  startReviewFlow({
-    documents,
-    totalPages,
-    selectedAi,
-    qcReport,
-    remediation
-  });
+  // Review stations disabled for the time being (startReviewFlow left intact
+  // below to re-enable — swap this back to startReviewFlow({...}) to restore).
+  showResults();
   if (qcReport.defects.length) console.warn("[Extractor] QC defects", qcReport.defects);
   runBtn.disabled = clearBtn.disabled = runBgBtn.disabled = false;
 }
@@ -4685,7 +4680,8 @@ function hydrateFromJob(job, runContext) {
   noticeEl.classList.toggle("error", !qcReport.passed);
   noticeEl.style.display = "flex";
 
-  startReviewFlow({ documents, totalPages, selectedAi, qcReport, remediation });
+  // Review stations disabled for the time being — see the in-tab finishRun() path.
+  showResults();
 
   runBtn.disabled = clearBtn.disabled = runBgBtn.disabled = false;
   barEl.style.display = "none";
