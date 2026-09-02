@@ -260,21 +260,85 @@ function buildDocMessageBlocks(doc, pageMarkedText, stageInstructionText) {
   return blocks;
 }
 
-// mGA (and whatever sits in front of it) occasionally times out or bounces a
-// request under load — 524/502/503/429 are all transient, not a real
-// rejection of this request, so a retry clears most of them without forcing
-// a full job re-submission. 4xx other than 429 (e.g. 401) is not retried —
-// retrying a bad-token error just wastes attempts failing the same way.
-// MAX_ATTEMPTS=5 with delays of 2s/4s/6s/8s between attempts (~20s of total
-// cushion) — sized up from an original 3-attempt/~6s budget after a real job
-// still hit a 524 on every attempt within that shorter window, meaning the
-// outage it hit outlasted 6s.
+// mGA (and whatever sits in front of it) occasionally bounces a request
+// under load — 502/503/429/etc are transient, not a real rejection of this
+// request, so a retry clears most of them without forcing a full job
+// re-submission. 4xx other than 429 (e.g. 401) is not retried — retrying a
+// bad-token error just wastes attempts failing the same way.
+//
+// 524 specifically ("origin didn't complete the response in time") turned
+// out NOT to be transient for large labels: a real job hit 524 on every one
+// of 5 attempts (~20s of retry cushion) extracting a 31-page document, while
+// a 22-page document in the same batch succeeded outright. That's a
+// deterministic size/latency mismatch, not flakiness — a non-streamed
+// request forces the gateway to buffer the model's entire response before
+// relaying anything, so a slow-but-healthy multi-minute generation looks
+// identical to a hung origin. Streaming (`stream: true` below) fixes this:
+// once the model starts emitting tokens, bytes flow back through the
+// gateway almost immediately, so the connection is never idle long enough
+// to trip a completion timeout, regardless of total generation time. 524 is
+// kept in RETRYABLE_STATUS below for the initial response (a real transient
+// gateway bounce can still return it before any streaming starts).
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 524]);
 const MAX_ATTEMPTS = 5;
 const RETRY_BASE_DELAY_MS = 2000;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Reads an Anthropic Messages SSE stream and reassembles it into the same
+// { stop_reason, content } shape the non-streaming API returns, so callers
+// don't need to know the response was streamed.
+async function readMessagesStream(response) {
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  const blocksByIndex = new Map();
+  let stopReason = null;
+  let buffer = "";
+
+  const handleEvent = (dataLine) => {
+    if (!dataLine) return;
+    const evt = JSON.parse(dataLine);
+    if (evt.type === "error") {
+      throw new Error(evt.error?.message || "mGA stream reported an error event");
+    } else if (evt.type === "content_block_start") {
+      blocksByIndex.set(evt.index, { ...evt.content_block, _json: "" });
+    } else if (evt.type === "content_block_delta") {
+      const block = blocksByIndex.get(evt.index);
+      if (!block) return;
+      if (evt.delta.type === "input_json_delta") block._json += evt.delta.partial_json;
+      else if (evt.delta.type === "text_delta") block.text = (block.text || "") + evt.delta.text;
+    } else if (evt.type === "content_block_stop") {
+      const block = blocksByIndex.get(evt.index);
+      if (block && block.type === "tool_use") {
+        block.input = block._json ? JSON.parse(block._json) : {};
+      }
+    } else if (evt.type === "message_delta") {
+      if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += value;
+      let sepIndex;
+      while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
+        const rawEvent = buffer.slice(0, sepIndex);
+        buffer = buffer.slice(sepIndex + 2);
+        const dataLine = rawEvent
+          .split("\n")
+          .find(line => line.startsWith("data:"));
+        if (dataLine) handleEvent(dataLine.slice(5).trim());
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const content = [...blocksByIndex.values()].map(({ _json, ...block }) => block);
+  return { stop_reason: stopReason, content };
 }
 
 async function callAnthropic(env, messages, systemBlocks, tools, toolChoiceName) {
@@ -284,32 +348,51 @@ async function callAnthropic(env, messages, systemBlocks, tools, toolChoiceName)
     system: systemBlocks,
     messages,
     tools,
-    tool_choice: { type: "tool", name: toolChoiceName }
+    tool_choice: { type: "tool", name: toolChoiceName },
+    stream: true
   });
 
-  let response;
+  let data;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    response = await fetch(MGA_UPSTREAM, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "authorization": `Bearer ${env.MGA_TOKEN}`,
-        "anthropic-version": "2023-06-01"
-      },
-      body
-    });
-    if (response.ok || !RETRYABLE_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) break;
-    console.warn(`mGA request got ${response.status} (attempt ${attempt}/${MAX_ATTEMPTS}) — retrying…`);
-    await sleep(RETRY_BASE_DELAY_MS * attempt);
+    let response;
+    try {
+      response = await fetch(MGA_UPSTREAM, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "authorization": `Bearer ${env.MGA_TOKEN}`,
+          "anthropic-version": "2023-06-01"
+        },
+        body
+      });
+    } catch (err) {
+      if (attempt === MAX_ATTEMPTS) throw new Error(`mGA request failed: ${err.message}`);
+      console.warn(`mGA request errored (attempt ${attempt}/${MAX_ATTEMPTS}): ${err.message} — retrying…`);
+      await sleep(RETRY_BASE_DELAY_MS * attempt);
+      continue;
+    }
+
+    if (!response.ok) {
+      if (!RETRYABLE_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) {
+        let detail = "";
+        try { detail = (await response.json()).error?.message || ""; } catch (_) { /* body wasn't JSON */ }
+        throw new Error(`mGA request failed (${response.status})${detail ? `: ${detail}` : ""}`);
+      }
+      console.warn(`mGA request got ${response.status} (attempt ${attempt}/${MAX_ATTEMPTS}) — retrying…`);
+      await sleep(RETRY_BASE_DELAY_MS * attempt);
+      continue;
+    }
+
+    try {
+      data = await readMessagesStream(response);
+      break;
+    } catch (err) {
+      if (attempt === MAX_ATTEMPTS) throw new Error(`mGA stream failed: ${err.message}`);
+      console.warn(`mGA stream dropped (attempt ${attempt}/${MAX_ATTEMPTS}): ${err.message} — retrying…`);
+      await sleep(RETRY_BASE_DELAY_MS * attempt);
+    }
   }
 
-  if (!response.ok) {
-    let detail = "";
-    try { detail = (await response.json()).error?.message || ""; } catch (_) { /* body wasn't JSON */ }
-    throw new Error(`mGA request failed (${response.status})${detail ? `: ${detail}` : ""}`);
-  }
-
-  const data = await response.json();
   if (data.stop_reason === "max_tokens") {
     console.warn(`response hit the ${MAX_TOKENS}-token output limit for this turn — output may be truncated.`);
   }
