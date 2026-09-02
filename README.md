@@ -64,6 +64,8 @@ graph LR
 6. **SheetJS (bundled)**: Generates Excel files; includes audit columns (Page, Source, Confidence)
 
 **No external APIs, no backend server, no authentication — everything runs in the browser.**
+(True for this regex/heuristic path. The AI extraction pilot and background-job mode below
+both route through small Cloudflare backends — see their own sections.)
 
 ### Two extraction paths, not one
 
@@ -158,6 +160,32 @@ undertaking.
 
 **See [DEPLOYMENT.md](DEPLOYMENT.md) for full Cloudflare Pages setup instructions.**
 
+## Background jobs (batch mode)
+
+The in-tab AI pipeline above needs the browser tab to stay open for the whole run — fine for
+one or two labels, awkward for a large batch. **Run in background** (next to **Run Extraction**)
+submits the same AI pipeline to run server-side instead, so you can close the tab and come
+back later:
+
+1. Click **Run in background**. Each document's extracted text is POSTed to `/api/jobs`, which
+   queues one Cloudflare Queue message per file and returns immediately.
+2. The page switches to a `?job=<jobId>` status view and polls `/api/jobs/<jobId>` every ~5s,
+   showing each file's stage (extraction → validate/correct → QC → remediate).
+3. A standalone Cloudflare Worker (`worker/`, a separate deployable from the Pages project)
+   consumes the queue and runs the exact same multi-stage pipeline as the in-tab path
+   (`worker/src/pipeline.js` is a ported copy of the relevant functions in `app/index.html`),
+   writing progress and final rows/QC report to a shared KV namespace as it goes.
+4. Reopen the `?job=<jobId>` URL any time (this browser also remembers the last job you
+   submitted and shows a banner linking back to it) — once every file is done, results render
+   through the same QC-gate and review-flow UI as a normal run.
+
+Job records (input text, per-file status, rows, QC report) expire from KV after 7 days.
+
+**This needs one-time Cloudflare dashboard setup beyond deploying the code** — a KV namespace,
+a Queue, the Pages project's "v2 build system" toggle (so its root `wrangler.toml` bindings take
+effect), and the `worker/` project deployed as its own Worker with its own `MGA_TOKEN` secret.
+See the comments at the top of `wrangler.toml` and `worker/wrangler.toml` for the exact steps.
+
 ## Output schema
 
 The 27-column Use Summary Table defined in `knowledge/UST_definitions.txt`. Column meanings
@@ -192,6 +220,9 @@ Without it, the app still runs and reports pages that have no text layer.
 ```
 app/index.html                  The entire application (UI + parser + export)
 app/vendor/                     Locally bundled OCR library (optional)
+functions/api/                  Cloudflare Pages Functions: AI extraction relay + job submit/status
+worker/                         Standalone Cloudflare Worker: background-job queue consumer
+wrangler.toml                   Pages project bindings (KV + queue producer)
 specs/PRD.md                    Requirements R1–R17
 specs/Tasks.md                  Implementation checklist
 specs/Demo.md                   Five-minute walkthrough script
