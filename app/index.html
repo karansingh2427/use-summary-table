@@ -142,6 +142,21 @@
   }
   .qc-defects.collapsed .qc-defects-content { max-height: 0; border-top: none; padding: 0; }
   .qc-defects ul { margin: 0; padding-left: 18px; }
+
+  .job-files-panel {
+    display: none; margin-top: 18px; border: 1px solid var(--line);
+    border-radius: 10px; padding: 4px 14px; font-size: 14px;
+  }
+  .job-file-row {
+    display: flex; align-items: center; gap: 10px; padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .job-file-row:last-child { border-bottom: none; }
+  .job-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .job-file-status { color: var(--muted); font-size: 13px; }
+  .job-file-status.error { color: #b42318; }
+  .job-file-status.done { color: var(--ok); }
+  .job-file-retry { padding: 6px 12px; font-size: 13px; }
   .qc-defects li { margin-bottom: 4px; }
 
   .warnings {
@@ -488,6 +503,7 @@
       <button class="ghost" id="jumpBackBtn" type="button">Back to review station</button>
     </div>
     <div class="status" id="resultsPlaceholder" role="status">Results will appear here once extraction has run.</div>
+    <div class="job-files-panel" id="jobFilesPanel" role="region" aria-label="Background job files"></div>
 
     <div id="results">
       <div class="stats" id="stats"></div>
@@ -2674,6 +2690,7 @@ function coverageWarnings(rows, documents) {
 ------------------------------------------------------------------ */
 const resultsEl     = document.getElementById("results");
 const placeholderEl = document.getElementById("resultsPlaceholder");
+const jobFilesPanelEl = document.getElementById("jobFilesPanel");
 const statsEl       = document.getElementById("stats");
 const warningsEl    = document.getElementById("warnings");
 const groupsEl      = document.getElementById("groups");
@@ -3737,6 +3754,8 @@ runBtn.addEventListener("click", async () => {
   qcDefectsEl.style.display = "none";
   qcDefectsEl.innerHTML = "";
   resultsEl.style.display = "none";
+  jobFilesPanelEl.style.display = "none";
+  jobFilesPanelEl.innerHTML = "";
   placeholderEl.style.display = "block";
   placeholderEl.textContent = "Running extraction and QC gate…";
   logEl.style.display = "block";
@@ -4499,6 +4518,72 @@ function stopJobPoll() {
   if (jobPollTimer) { clearTimeout(jobPollTimer); jobPollTimer = null; }
 }
 
+// Remembered so a per-file retry (which can happen after the job has already
+// settled and hydrateFromJob has rendered results) can resume polling with
+// the same document context the original run used — see renderJobStatusView.
+let currentJobRunContext = null;
+
+// Renders a per-file status list with a Retry button for any file that
+// errored out (e.g. a sustained mGA 524) — kept visible both while a job is
+// still polling and after it settles, since hydrateFromJob hides the plain-
+// text placeholder log once results render, and errored files would
+// otherwise have no way to be re-run without resubmitting the whole batch.
+function renderJobFilesPanel(job, jobId) {
+  const hasError = job.files.some(f => f.status === "error");
+  if (!hasError) {
+    jobFilesPanelEl.style.display = "none";
+    jobFilesPanelEl.innerHTML = "";
+    return;
+  }
+  jobFilesPanelEl.dataset.jobId = jobId;
+  jobFilesPanelEl.innerHTML = job.files.map(f => {
+    const name = esc(f.fileName || `file ${f.fileIndex + 1}`);
+    const statusText = f.status === "done" ? "done"
+      : f.status === "error" ? `error — ${esc(f.error || "unknown error")}`
+      : f.status === "processing" ? esc(f.stage || "processing")
+      : "queued";
+    const retryBtn = f.status === "error"
+      ? `<button type="button" class="ghost job-file-retry" data-file-index="${f.fileIndex}">Retry</button>`
+      : "";
+    return `<div class="job-file-row">`
+      + `<span class="job-file-name">${name}</span>`
+      + `<span class="job-file-status ${f.status}">${statusText}</span>`
+      + retryBtn
+      + `</div>`;
+  }).join("");
+  jobFilesPanelEl.style.display = "block";
+}
+
+jobFilesPanelEl.addEventListener("click", async (e) => {
+  const btn = e.target.closest(".job-file-retry");
+  if (!btn) return;
+  const jobId = jobFilesPanelEl.dataset.jobId;
+  const fileIndex = Number(btn.dataset.fileIndex);
+  btn.disabled = true;
+  btn.textContent = "Retrying…";
+  try {
+    const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ust-pilot": PILOT_GATE_HEADER_VALUE },
+      body: JSON.stringify({ fileIndex })
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error?.message || `HTTP ${response.status}`);
+    }
+    // Resume polling regardless of whether the job had already settled —
+    // pollJobStatus re-renders both the results (via hydrateFromJob) and
+    // this panel once the retried file finishes.
+    stopJobPoll();
+    barEl.style.display = "block";
+    pollJobStatus(jobId, currentJobRunContext);
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "Retry";
+    showNotice(`Could not retry file: ${err.message}`, "error");
+  }
+});
+
 async function submitBackgroundJob(documents, totalPages, selectedAi) {
   aiPicker.style.display = "none";
   pendingRun = null;
@@ -4624,6 +4709,7 @@ function hydrateFromJob(job, runContext) {
 
   // Review stations disabled for the time being — see the in-tab finishRun() path.
   showResults();
+  renderJobFilesPanel(job, job.jobId);
 
   runBtn.disabled = clearBtn.disabled = runBgBtn.disabled = false;
   barEl.style.display = "none";
@@ -4651,6 +4737,7 @@ async function pollJobStatus(jobId, runContext) {
   placeholderEl.textContent = `Background job ${jobId}: ${doneCount} of ${job.totalFiles} file(s) settled.\n\n${formatJobStatusLog(job)}`;
   statusEl.textContent = `Background job ${jobId}: ${doneCount} of ${job.totalFiles} file(s) settled.`;
   setProgress((doneCount / job.totalFiles) * 100);
+  renderJobFilesPanel(job, jobId);
 
   if (job.status === "processing") {
     jobPollTimer = setTimeout(() => pollJobStatus(jobId, runContext), 5000);
@@ -4664,9 +4751,12 @@ async function pollJobStatus(jobId, runContext) {
 function renderJobStatusView(jobId, runContext) {
   stopJobPoll();
   clearReviewFlow();
+  currentJobRunContext = runContext;
   runBtn.disabled = clearBtn.disabled = runBgBtn.disabled = true;
   resultsEl.style.display = "none";
   noticeEl.style.display = "none";
+  jobFilesPanelEl.style.display = "none";
+  jobFilesPanelEl.innerHTML = "";
   placeholderEl.style.display = "block";
   placeholderEl.textContent = `Loading background job ${jobId}…`;
   statusEl.textContent = placeholderEl.textContent;

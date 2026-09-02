@@ -15,6 +15,9 @@
 //   job:<jobId>:meta            { jobId, createdAt, totalFiles }
 //   job:<jobId>:input:<fileIndex>  { fileName, pageMarkedText, selectedAi }
 //   job:<jobId>:file:<fileIndex>   { fileName, status, stage?, rows?, qcReport?, error? }
+//
+// A single failed file can be re-enqueued without resubmitting the whole
+// batch via jobs/[id]/retry.js, which reuses the input this function wrote.
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const JOB_TTL_SECONDS = 7 * 24 * 60 * 60;
