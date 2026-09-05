@@ -47,8 +47,8 @@ An agent may search the web, but only within these limits:
 
 | Path | What it is |
 |---|---|
-| `UST_definitions.txt` | **The authoritative column definitions** — source for the 27-column schema |
-| `schema-reference.md` | The 27 columns, what each means, and how to fill it |
+| `UST_definitions.txt` | **The authoritative column definitions** — source for the 28-column schema |
+| `schema-reference.md` | The 28 columns, what each means, and how to fill it |
 | `extraction-rules.md` | 13 rules distilled from the training logs, each tracing to a logged mistake |
 | `derivation-rules.md` | The convention for filling Use Site, App. Type and App. Timing (Site Status), which labels rarely state verbatim. Each rule names the evidence it requires (R24) |
 | `unit-conversions.md` | Conversion factors and the lb ai/A calculation |

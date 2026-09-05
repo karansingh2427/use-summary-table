@@ -25,7 +25,7 @@ tracked separately.
 appears on several rows when it has both a foliar and a soil application, because the rates,
 intervals, and restrictions differ. Row count is driven by the label, never fixed.
 
-The schema has 27 columns in five groups, in this exact order:
+The schema has 28 columns in five groups, in this exact order:
 
 **Product**
 
@@ -34,6 +34,7 @@ The schema has 27 columns in five groups, in this exact order:
 | Reg. #/File Sym | EPA Registration Number, or File Symbol if registration is pending |
 | Physical Form | Formulation type — WP, SC, WG, EC, Granular, WDG, and so on |
 | Product Name (PBN) | Primary Brand Name |
+| Alternative Brand Name (ABN) | Alternate brand name(s) the label states for this use, distinct from the one master PBN |
 
 **Site**
 
@@ -110,7 +111,7 @@ status messages appear.
 **R3 · Read the whole label.** Every page and section is read, not just the first table.
 *Verify:* Upload a label and check the log reports the same number of pages the PDF has.
 
-**R4 · Complete, consistent rows.** Every row has all 27 columns; missing values read `NS`,
+**R4 · Complete, consistent rows.** Every row has all 28 columns; missing values read `NS`,
 and columns that do not apply read `NA`.
 *Verify:* Scan the table for empty cells. There should be none.
 

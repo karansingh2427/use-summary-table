@@ -49,6 +49,7 @@ const SCHEMA = [
   "Reg. #/File Sym",
   "Physical Form",
   "Product Name (PBN)",
+  "Alternative Brand Name (ABN)",
   // Site
   "Use",
   "Use Site",
@@ -93,6 +94,7 @@ const COLUMN_DEFINITIONS = {
   "Reg. #/File Sym": "EPA Registration Number (or File Symbol if pending registration).",
   "Physical Form": "Type of formulation — WP, SC, Granular, WDG, etc.",
   "Product Name (PBN)": "Primary Brand Name.",
+  "Alternative Brand Name (ABN)": "Any alternate brand name(s) the label states for THIS use/section (e.g. a line reading \"ABN: <name>\"), distinct from the one master Product Name (PBN) that is also restated at the end of the label. List every ABN that applies to this row, semicolon-separated if there is more than one. Leave as NS when the label states no ABN for this use.",
   "Use": "The crop, crop group, turf, plantscape, seed treatment, etc. this row applies to — e.g. \"SOYBEAN\", \"CITRUS FRUITS (CROP GROUP 10-10)\", \"Turf\". This is a crop/site name, NOT a description of what the product does (do not write things like \"Herbicide - Weed Control\" here — that belongs in App. Target / Additional Information).",
   "Use Site": "Agricultural (Outdoor), Greenhouse (Indoor), Residential (Outdoor), etc.",
   "App. Target": "foliar, soil, seed treatment.",
@@ -129,7 +131,7 @@ function blankRow() {
    label. A use name alone is weak; rates plus intervals plus restrictions is
    strong. Ported byte-for-byte from app/index.html:1799. */
 function scoreRow(row) {
-  const ignore = new Set(["Use", "Product Name (PBN)", "Reg. #/File Sym", "Physical Form"]);
+  const ignore = new Set(["Use", "Product Name (PBN)", "Alternative Brand Name (ABN)", "Reg. #/File Sym", "Physical Form"]);
   const derived = row.__derived || {};
   const counts = c => !ignore.has(c) && !derived[c] && row[c] !== NOT_SPECIFIED;
   const filled = SCHEMA.filter(counts).length;

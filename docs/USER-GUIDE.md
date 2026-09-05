@@ -1,6 +1,6 @@
 # Use Summary Table Extractor — User Guide
 
-*Last Updated: 1 August 2026*
+*Last Updated: 5 September 2026*
 
 A plain-language guide for anyone opening this tool for the first time.
 No technical background needed.
@@ -20,7 +20,7 @@ You get **one row for every combination of use, use site, and application method
 label describes. That means a single crop can produce several rows — if a label allows
 both ground and aerial application to lettuce, that is two rows, not one.
 
-Each row has 27 columns, in five groups.
+Each row has 28 columns, in five groups.
 
 **Product — what the label is for**
 
@@ -29,6 +29,7 @@ Each row has 27 columns, in five groups.
 | Reg. #/File Sym | The EPA registration number printed on the label |
 | Physical Form | The form of the product — liquid, granule, wettable powder, and so on |
 | Product Name (PBN) | The product's brand name |
+| Alternative Brand Name (ABN) | Any alternate brand name(s) the label states for this use, distinct from the one master brand name above — left blank (`NS`) when the label states none |
 
 **Site — what is being treated**
 

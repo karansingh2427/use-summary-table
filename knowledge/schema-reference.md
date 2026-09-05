@@ -22,7 +22,7 @@ per-crop-cycle and per-year maxima are tracked as separate columns.
 A crop with both a foliar and a soil application is **two rows** — the rates, PHI, and
 restrictions differ. Row count is driven by the label, never fixed.
 
-## The 27 Schema Columns
+## The 28 Schema Columns
 
 Order matters — exports are written in exactly this sequence.
 
@@ -33,50 +33,51 @@ Order matters — exports are written in exactly this sequence.
 | 1 | **Reg. #/File Sym** | EPA Registration Number, or File Symbol if registration is pending |
 | 2 | **Physical Form** | Formulation type — be explicit: WP, SC, WG, WDG, EC, SL, Granular |
 | 3 | **Product Name (PBN)** | Primary Brand Name |
+| 4 | **Alternative Brand Name (ABN)** | Alternate brand name(s) the label states for this use, distinct from the one master PBN |
 
 ### Site
 
 | # | Column | Definition |
 |---|---|---|
-| 4 | **Use** | Crop group, turf, plantscapes, seed treatment, etc. |
-| 5 | **Use Site** | Agricultural (Outdoor), Greenhouse (Indoor), Residential (Outdoor), Planthouse |
+| 5 | **Use** | Crop group, turf, plantscapes, seed treatment, etc. |
+| 6 | **Use Site** | Agricultural (Outdoor), Greenhouse (Indoor), Residential (Outdoor), Planthouse |
 
 ### Application Method
 
 | # | Column | Definition |
 |---|---|---|
-| 6 | **App. Target** | Foliar, soil, seed treatment |
-| 7 | **App. Type** | Broadcast, banded, soil drench, etc. |
-| 8 | **App. Equipment** | Aerial, ground boom, boomless ground, handheld, airblast |
-| 9 | **App. Timing (Site Status)** | Pre- or post- (crop) emergent |
-| 10 | **App. Timing (other)** | Timing dependent on pest pressure or another condition |
+| 7 | **App. Target** | Foliar, soil, seed treatment |
+| 8 | **App. Type** | Broadcast, banded, soil drench, etc. |
+| 9 | **App. Equipment** | Aerial, ground boom, boomless ground, handheld, airblast |
+| 10 | **App. Timing (Site Status)** | Pre- or post- (crop) emergent |
+| 11 | **App. Timing (other)** | Timing dependent on pest pressure or another condition |
 
 ### Rate Pattern
 
 | # | Column | Definition |
 |---|---|---|
-| 11 | **App Rate (lb ai/A)** | The applied rate as active ingredient per acre |
-| 12 | **A.I. Max Single Rate/App. (lb a.i./A)** | Maximum single rate of a.i. for this use/use site |
-| 13 | **Max # Apps/C.C.** | Maximum applications per crop cycle |
-| 14 | **A.I. Max Total Rate/C.C. (lb a.i./A)** | Maximum total a.i. per crop cycle |
-| 15 | **Max # Apps/Yr.** | Maximum applications within a 12-month period |
-| 16 | **A.I. Max Total Rate/Yr. (lb a.i./A)** | Maximum total a.i. within a 12-month period |
-| 17 | **MRI (days)** | Minimum retreatment interval |
-| 18 | **REI** | Restricted-entry interval — in **hours** |
-| 19 | **PHI (days)** | Preharvest interval — in **days** |
-| 20 | **PPE** | Personal protective equipment, quoted from the label |
-| 21 | **Additional Information** | Rate-relevant detail not captured above, e.g. a.i. annual caps |
-| 22 | **Max No. of CC/yr** | Maximum crop cycles per 12-month period |
+| 12 | **App Rate (lb ai/A)** | The applied rate as active ingredient per acre |
+| 13 | **A.I. Max Single Rate/App. (lb a.i./A)** | Maximum single rate of a.i. for this use/use site |
+| 14 | **Max # Apps/C.C.** | Maximum applications per crop cycle |
+| 15 | **A.I. Max Total Rate/C.C. (lb a.i./A)** | Maximum total a.i. per crop cycle |
+| 16 | **Max # Apps/Yr.** | Maximum applications within a 12-month period |
+| 17 | **A.I. Max Total Rate/Yr. (lb a.i./A)** | Maximum total a.i. within a 12-month period |
+| 18 | **MRI (days)** | Minimum retreatment interval |
+| 19 | **REI** | Restricted-entry interval — in **hours** |
+| 20 | **PHI (days)** | Preharvest interval — in **days** |
+| 21 | **PPE** | Personal protective equipment, quoted from the label |
+| 22 | **Additional Information** | Rate-relevant detail not captured above, e.g. a.i. annual caps |
+| 23 | **Max No. of CC/yr** | Maximum crop cycles per 12-month period |
 
 ### Restrictions
 
 | # | Column | Definition |
 |---|---|---|
-| 23 | **Geographic Restrictions** | e.g. not registered in a given state; CONUS-only |
-| 24 | **Drift Restrictions** | Wind speed, boom/release height, droplet size, buffers |
-| 25 | **Soil Restrictions** | Incorporation depth, excluded soil types, saturated-soil limits |
-| 26 | **On-field Non-target Species Restrictions** | Typically pollinator protections |
-| 27 | **Additional Restrictions for Use/Use Site** | Tank-mix bans, adjuvant bans, grazing limits |
+| 24 | **Geographic Restrictions** | e.g. not registered in a given state; CONUS-only |
+| 25 | **Drift Restrictions** | Wind speed, boom/release height, droplet size, buffers |
+| 26 | **Soil Restrictions** | Incorporation depth, excluded soil types, saturated-soil limits |
+| 27 | **On-field Non-target Species Restrictions** | Typically pollinator protections |
+| 28 | **Additional Restrictions for Use/Use Site** | Tank-mix bans, adjuvant bans, grazing limits |
 
 ## Fill rules
 
@@ -121,7 +122,8 @@ a per-cycle figure.
 
 `A.I.` / `a.i.` = active ingredient · `C.C.` = Crop Cycle · `MRI` = Minimum Retreatment
 Interval · `PHI` = Preharvest Interval · `REI` = Restricted-Entry Interval ·
-`PBN` = Primary Brand Name · `NS` = Not Specified · `NA` = Not Applicable
+`PBN` = Primary Brand Name · `ABN` = Alternative Brand Name · `NS` = Not Specified ·
+`NA` = Not Applicable
 
 ## Review Columns
 
@@ -150,6 +152,27 @@ Where the column cannot apply to the use at all, write `NA`.
 A crop with a foliar and a soil application produces two rows. Rows are keyed on
 `Source File` + `Use` + `Use Site` + `App. Target` + `App. Type`, so that combination should
 not repeat within a label.
+
+### Alternative Brand Name (ABN) vs Product Name (PBN)
+
+A label has exactly **one** master `Product Name (PBN)` — the name on the front panel,
+restated again at the end of the label. Some labels additionally call out one or more
+**Alternative Brand Names** for specific uses, typically stated right where that use is
+described, e.g.:
+
+```
+PENTRIME
+ABN: EverGol Activ
+For: Use as a fungicide treatment for protection against listed soilborne...
+```
+
+- Fill `Alternative Brand Name (ABN)` with every ABN the label states **for that row's
+  use** — semicolon-join if the label states more than one for the same row, following the
+  same convention used for multiple active ingredients (see Ranges below).
+- `Product Name (PBN)` always stays the one master brand name; never substitute an ABN
+  into the PBN column, and never repeat the PBN into the ABN column.
+- When the label states no ABN for a use, leave the cell `NS` — same rule as any other
+  column the label is silent on.
 
 ### Crop names and groups
 
