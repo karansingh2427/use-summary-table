@@ -143,6 +143,39 @@
   .qc-defects.collapsed .qc-defects-content { max-height: 0; border-top: none; padding: 0; }
   .qc-defects ul { margin: 0; padding-left: 18px; }
 
+  .chat-panel {
+    margin-top: 18px; margin-bottom: 18px; border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px; font-size: 14px; background: #fbfcfe;
+  }
+  .chat-head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-weight: 600; margin-bottom: 10px;
+  }
+  .chat-head button { padding: 6px 12px; font-size: 13px; }
+  .chat-messages {
+    max-height: 320px; overflow-y: auto; display: flex; flex-direction: column;
+    gap: 8px; margin-bottom: 10px;
+  }
+  .chat-messages:empty { display: none; }
+  .chat-msg {
+    max-width: 85%; padding: 9px 12px; border-radius: 10px; font-size: 13.5px;
+    line-height: 1.45; white-space: pre-wrap;
+  }
+  .chat-msg.user {
+    align-self: flex-end; background: var(--brand); color: #fff;
+  }
+  .chat-msg.assistant {
+    align-self: flex-start; background: #eef4ff; color: #1f2a44; border: 1px solid #dbe4f3;
+  }
+  .chat-msg.pending { opacity: .6; font-style: italic; }
+  .chat-msg.error { background: #fef3f2; border: 1px solid #fecdca; color: #b42318; }
+  #chatForm { display: flex; gap: 10px; }
+  #chatInput {
+    flex: 1; font: inherit; padding: 9px 12px; border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  #chatForm button { padding: 9px 18px; }
+
   .job-files-panel {
     display: none; margin-top: 18px; border: 1px solid var(--line);
     border-radius: 10px; padding: 4px 14px; font-size: 14px;
@@ -521,6 +554,16 @@
       </div>
       <p class="hint">Double-click any cell to correct it · click a row's <b>▸</b> to see the source text it came from</p>
       <p class="hint">Cells marked <b style="color:#d9910d">◆</b> were filled by a documented convention rule rather than copied word-for-word from the label. Hover the cell to see which rule fired, or open <code>knowledge/derivation-rules.md</code>.</p>
+
+      <div class="chat-panel" id="chatPanel">
+        <div class="chat-head">💬 Ask about these results <button class="ghost" id="chatClearBtn" type="button">Clear</button></div>
+        <div class="chat-messages" id="chatMessages" role="log" aria-live="polite"></div>
+        <form id="chatForm">
+          <input id="chatInput" type="text" placeholder="e.g. Why is REI 12 hours on the citrus row?" aria-label="Ask a question about these results" />
+          <button class="primary" id="chatSendBtn" type="submit">Ask</button>
+        </form>
+      </div>
+
       <div id="groups"></div>
     </div>
   </section>
@@ -2716,10 +2759,16 @@ const reviewResumeBtn = document.getElementById("reviewResumeBtn");
 const reviewRerunBtn = document.getElementById("reviewRerunBtn");
 const jumpBackWrapEl = document.getElementById("jumpBackWrap");
 const jumpBackBtn = document.getElementById("jumpBackBtn");
+const chatMessagesEl = document.getElementById("chatMessages");
+const chatFormEl = document.getElementById("chatForm");
+const chatInputEl = document.getElementById("chatInput");
+const chatSendBtn = document.getElementById("chatSendBtn");
+const chatClearBtn = document.getElementById("chatClearBtn");
 
 let allRows = [];   // every parsed row, across all files
 let reviewFlow = null;
 let jumpContext = null;
+let chatMessages = [];   // [{role: "user"|"assistant", text}] — chat turns for the current run's results
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -4162,6 +4211,110 @@ async function callAnthropic(messages, systemBlocks, tools, toolChoiceName) {
   return { data, toolUse };
 }
 
+/* ------------------------------------------------------------------
+   Q&A chat panel — read-only questions about the already-extracted
+   results (no tool-calling, no edits from chat). Rebuilds its system
+   prompt from the live `allRows` on every turn so answers reflect any
+   manual cell edits made between questions.
+------------------------------------------------------------------ */
+function buildChatSystemBlocks() {
+  const text = [
+    "You are helping a regulatory analyst review an already-extracted Use Summary Table. Answer questions ONLY using the row data and QC findings given below — never invent a value. When a question is about a specific row, cite its source file, page, and (if present) the row's __source/Evidence text. If the label text needed to answer isn't present in the data below, say so rather than guessing.",
+    "If the user asks you to change, correct, or fix a value, do NOT claim to make the change — tell them to double-click the cell in the table to edit it directly.",
+    "",
+    "Column glossary:",
+    JSON.stringify(COLUMN_DEFINITIONS),
+    "",
+    "Current extracted rows (JSON array, one object per row):",
+    JSON.stringify(allRows),
+    "",
+    "AI QC findings for this run (JSON array, may be empty):",
+    JSON.stringify(window.__aiQcReports || [])
+  ].join("\n");
+  return [{ type: "text", text }];
+}
+
+function renderChatMessages() {
+  chatMessagesEl.innerHTML = chatMessages.map((m, i) => {
+    const cls = m.role === "user" ? "user" : "assistant";
+    const extra = m.pending ? " pending" : m.error ? " error" : "";
+    return `<div class="chat-msg ${cls}${extra}" data-idx="${i}">${esc(m.text)}</div>`;
+  }).join("");
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+}
+
+async function askChat(question) {
+  chatMessages.push({ role: "user", text: question });
+  chatMessages.push({ role: "assistant", text: "Thinking…", pending: true });
+  renderChatMessages();
+
+  const apiMessages = chatMessages
+    .filter(m => !m.pending)
+    .map(m => ({ role: m.role, content: m.text }));
+
+  const body = JSON.stringify({
+    model: "claude-sonnet-5",
+    max_tokens: 1500,
+    system: buildChatSystemBlocks(),
+    messages: apiMessages
+  });
+
+  let response;
+  try {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      response = await fetch(RELAY_ENDPOINT, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-ust-pilot": PILOT_GATE_HEADER_VALUE },
+        body
+      });
+      if (response.ok || !RETRYABLE_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) break;
+      await sleep(RETRY_BASE_DELAY_MS * attempt);
+    }
+
+    if (!response.ok) {
+      let detail = "";
+      try { detail = (await response.json()).error?.message || ""; } catch (_) { /* body wasn't JSON */ }
+      throw new Error(`Request failed (${response.status})${detail ? `: ${detail}` : ""}`);
+    }
+
+    const data = await response.json();
+    const textBlock = (data.content || []).find(b => b.type === "text");
+    if (!textBlock) throw new Error("Response did not include a text answer.");
+
+    const last = chatMessages[chatMessages.length - 1];
+    last.text = textBlock.text;
+    delete last.pending;
+  } catch (err) {
+    const last = chatMessages[chatMessages.length - 1];
+    last.text = `Couldn't get an answer: ${err.message}`;
+    delete last.pending;
+    last.error = true;
+  } finally {
+    renderChatMessages();
+  }
+}
+
+chatFormEl.addEventListener("submit", async e => {
+  e.preventDefault();
+  const question = chatInputEl.value.trim();
+  if (!question) return;
+  chatInputEl.value = "";
+  chatSendBtn.disabled = true;
+  chatInputEl.disabled = true;
+  try {
+    await askChat(question);
+  } finally {
+    chatSendBtn.disabled = false;
+    chatInputEl.disabled = false;
+    chatInputEl.focus();
+  }
+});
+
+chatClearBtn.addEventListener("click", () => {
+  chatMessages = [];
+  renderChatMessages();
+});
+
 // Stage 1 — extraction agent: read the label, emit the initial row set.
 async function runExtractionTurn(doc, pageMarkedText, systemBlocks, tools, pState) {
   updateAiProgress(pState, "extraction (stage 1/3)");
@@ -4331,6 +4484,8 @@ async function finishRun(documents, totalPages, selectedAi) {
   // LLM read the label and apply EXTRACTION_RULES_MD / DERIVATION_RULES_MD.
   statusEl.textContent = "Parsing uses and application methods…";
   allRows = [];
+  chatMessages = [];
+  renderChatMessages();
   const aiQcReports = [];
 
   const useLLM = llmExtractToggle.checked;
@@ -4672,6 +4827,8 @@ function formatJobStatusLog(job) {
 // this is why documents:[] being safe (see comment above) matters.
 function hydrateFromJob(job, runContext) {
   allRows = [];
+  chatMessages = [];
+  renderChatMessages();
   const aiQcReports = [];
   job.files.forEach(f => {
     if (Array.isArray(f.rows)) allRows.push(...f.rows);
