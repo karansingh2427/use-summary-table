@@ -169,12 +169,32 @@
   }
   .chat-msg.pending { opacity: .6; font-style: italic; }
   .chat-msg.error { background: #fef3f2; border: 1px solid #fecdca; color: #b42318; }
+  .chat-msg.error button { margin-left: 8px; padding: 4px 10px; font-size: 12.5px; }
   #chatForm { display: flex; gap: 10px; }
   #chatInput {
     flex: 1; font: inherit; padding: 9px 12px; border: 1px solid var(--line);
     border-radius: 8px;
   }
   #chatForm button { padding: 9px 18px; }
+  #chatForm:has(#chatInput:disabled) { opacity: .7; }
+  .chat-gate-hint { display: none; margin: 6px 0 0; font-size: 12.5px; color: var(--muted); }
+
+  .chat-edit-card {
+    align-self: flex-start; max-width: 85%; border: 1px solid #bfd4ff;
+    background: #f5f9ff; border-radius: 10px; padding: 10px 12px; font-size: 13px;
+  }
+  .chat-edit-card .row-ctx { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .chat-edit-card .diff { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-bottom: 6px; }
+  .chat-edit-card .diff .col { font-weight: 600; font-family: inherit; }
+  .chat-edit-card .diff .old { color: #b42318; text-decoration: line-through; }
+  .chat-edit-card .diff .new { color: #067647; }
+  .chat-edit-card .reason { color: #33415c; margin-bottom: 8px; }
+  .chat-edit-card .actions { display: flex; gap: 8px; }
+  .chat-edit-card .actions button { padding: 6px 14px; font-size: 12.5px; }
+  .chat-edit-card .badge { font-weight: 600; font-size: 12.5px; }
+  .chat-edit-card.resolved.applied .badge { color: #067647; }
+  .chat-edit-card.resolved.rejected .badge { color: #667085; }
+  .chat-edit-card.resolved.error .badge { color: #b42318; }
 
   .job-files-panel {
     display: none; margin-top: 18px; border: 1px solid var(--line);
@@ -562,6 +582,7 @@
           <input id="chatInput" type="text" placeholder="e.g. Why is REI 12 hours on the citrus row?" aria-label="Ask a question about these results" />
           <button class="primary" id="chatSendBtn" type="submit">Ask</button>
         </form>
+        <p class="chat-gate-hint" id="chatGateHint" style="display:none">Resolve the proposed change(s) above before asking another question.</p>
       </div>
 
       <div id="groups"></div>
@@ -2764,11 +2785,22 @@ const chatFormEl = document.getElementById("chatForm");
 const chatInputEl = document.getElementById("chatInput");
 const chatSendBtn = document.getElementById("chatSendBtn");
 const chatClearBtn = document.getElementById("chatClearBtn");
+const chatGateHintEl = document.getElementById("chatGateHint");
 
 let allRows = [];   // every parsed row, across all files
 let reviewFlow = null;
 let jumpContext = null;
-let chatMessages = [];   // [{role: "user"|"assistant", text}] — chat turns for the current run's results
+// Chat turns in the literal Anthropic Messages API content-block shape, so
+// they can be resent verbatim — see askChat(). A user question turn is
+// {role:"user", content:[{type:"text", text}]}; an assistant turn is
+// {role:"assistant", content: <raw data.content from the API>}, which may
+// hold tool_use blocks (see buildProposeEditTool) alongside text; those
+// tool_use blocks get an edit._status ("applied"/"rejected"/"error") set
+// in place once the analyst resolves the proposal card, and once every
+// edit in a turn is resolved a synthetic tool_result turn is appended.
+let chatMessages = [];
+let chatPending = null;   // { question } while a request is in flight — not yet committed to chatMessages
+let chatError = null;     // { question, message } for the last failed request — offers a Retry control
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -3501,6 +3533,21 @@ groupsEl.addEventListener("click", e => {
   toggle.setAttribute("aria-label", "Hide source text");
 });
 
+// Shared by inline double-click editing and chat-driven edit proposals
+// (askChat's propose_row_edit tool) — both commit a single cell change the
+// same way, so Confidence/derived-flag bookkeeping can't drift between the
+// two entry points. Returns false (no-op) when the value is unchanged.
+function commitCellEdit(row, col, value) {
+  if (value === row[col]) return false;
+  row[col] = value;
+  row.__edited = row.__edited || {};
+  row.__edited[col] = true;
+  // R24 — a hand-edit replaces a derived value, so it is no longer derived.
+  if (row.__derived && row.__derived[col]) delete row.__derived[col];
+  row["Confidence"] = scoreRow(row);
+  return true;
+}
+
 // Inline editing (R14)
 groupsEl.addEventListener("blur", e => {
   const td = e.target.closest("td[contenteditable]");
@@ -3510,17 +3557,9 @@ groupsEl.addEventListener("blur", e => {
   const row = allRows.find(r => r.__id === id);
   if (!row) return;
   const value = td.textContent.trim() || NOT_SPECIFIED;
-  if (value === row[col]) return;
-  row[col] = value;
-  row.__edited = row.__edited || {};
-  row.__edited[col] = true;
-  // R24 — a hand-edit replaces a derived value, so it is no longer derived.
-  if (row.__derived && row.__derived[col]) {
-    delete row.__derived[col];
-    td.classList.remove("derived");
-    td.removeAttribute("title");
-  }
-  row["Confidence"] = scoreRow(row);
+  if (!commitCellEdit(row, col, value)) return;
+  td.classList.remove("derived");
+  td.removeAttribute("title");
   td.classList.add("edited");
   td.classList.toggle("na", value === NOT_SPECIFIED);
   renderStats(allRows);
@@ -4097,6 +4136,37 @@ function buildQcReportTool() {
   };
 }
 
+// Chat-only tool (see askChat) — deliberately NOT part of buildTools()
+// below, which is the extraction/QC/remediation pipeline's own array and
+// must stay byte-identical across those calls for cache reasons. The chat
+// call never shares a cache breakpoint with the pipeline, so there's no
+// cost to keeping this separate.
+function buildProposeEditTool() {
+  return {
+    name: "propose_row_edit",
+    description: "Propose one or more cell corrections for the analyst to review. This does NOT apply the change — the analyst must click Apply on the rendered proposal before anything changes. Only propose edits the analyst has asked for or clearly confirmed; for open questions, just answer in text instead.",
+    input_schema: {
+      type: "object",
+      properties: {
+        edits: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              rowId: { type: "string", description: "The __id of the row to change, from the row data given to you." },
+              column: { type: "string", enum: SCHEMA },
+              newValue: { type: "string" },
+              reason: { type: "string", description: "One sentence: why this change is correct, citing the row's source/page where possible." }
+            },
+            required: ["rowId", "column", "newValue", "reason"]
+          }
+        }
+      },
+      required: ["edits"]
+    }
+  };
+}
+
 function buildTools() {
   // Both tool schemas are sent on every call, regardless of stage —
   // tool_choice forces which one actually fires. Keeping the tools array
@@ -4220,7 +4290,7 @@ async function callAnthropic(messages, systemBlocks, tools, toolChoiceName) {
 function buildChatSystemBlocks() {
   const text = [
     "You are helping a regulatory analyst review an already-extracted Use Summary Table. Answer questions ONLY using the row data and QC findings given below — never invent a value. When a question is about a specific row, cite its source file, page, and (if present) the row's __source/Evidence text. If the label text needed to answer isn't present in the data below, say so rather than guessing.",
-    "If the user asks you to change, correct, or fix a value, do NOT claim to make the change — tell them to double-click the cell in the table to edit it directly.",
+    "If the analyst asks for, or clearly confirms, a specific correction to a cell (a concrete new value, not just \"this looks off\"), call propose_row_edit. This never applies the change itself — the analyst still has to click Apply on the rendered proposal — so never tell them the value has been changed; say it's been proposed for their review instead. If the request is vague or you're not sure what the new value should be, ask a clarifying question in text rather than guessing at newValue.",
     "",
     "Column glossary:",
     JSON.stringify(COLUMN_DEFINITIONS),
@@ -4234,29 +4304,161 @@ function buildChatSystemBlocks() {
   return [{ type: "text", text }];
 }
 
-function renderChatMessages() {
-  chatMessagesEl.innerHTML = chatMessages.map((m, i) => {
-    const cls = m.role === "user" ? "user" : "assistant";
-    const extra = m.pending ? " pending" : m.error ? " error" : "";
-    return `<div class="chat-msg ${cls}${extra}" data-idx="${i}">${esc(m.text)}</div>`;
-  }).join("");
-  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+// True while some assistant turn has a propose_row_edit whose edits aren't
+// all resolved yet — chat input stays disabled until the analyst clicks
+// Apply/Reject on every proposal, since sending another question first
+// would need a tool_result before the next user turn and there isn't one.
+function chatHasUnresolvedEdits() {
+  return chatMessages.some(m =>
+    m.role === "assistant" &&
+    (m.content || []).some(b =>
+      b.type === "tool_use" && b.name === "propose_row_edit" &&
+      (b.input.edits || []).some(ed => !ed._status)
+    )
+  );
 }
 
-async function askChat(question) {
-  chatMessages.push({ role: "user", text: question });
-  chatMessages.push({ role: "assistant", text: "Thinking…", pending: true });
-  renderChatMessages();
+function renderChatEditCard(edit, ti, bi, ei) {
+  const row = allRows.find(r => r.__id === edit.rowId);
+  const rowCtx = row ? `${esc(row["Use"])} · ${esc(row["Use Site"])}` : "Row not found";
+  const oldValue = row ? row[edit.column] : (edit._appliedFrom ?? "");
+  const resolvedCls = edit._status ? ` resolved ${edit._status}` : "";
+  let body;
+  if (edit._status === "applied") {
+    body = `<span class="badge">✓ Applied</span>`;
+  } else if (edit._status === "rejected") {
+    body = `<span class="badge">✕ Rejected</span>`;
+  } else if (edit._status === "error") {
+    body = `<span class="badge">${esc(edit._errorMessage || "Could not apply")}</span>`;
+  } else {
+    body = `<div class="actions">
+      <button class="primary" type="button" data-chat-apply data-turn="${ti}" data-block="${bi}" data-edit="${ei}">Apply</button>
+      <button class="ghost" type="button" data-chat-reject data-turn="${ti}" data-block="${bi}" data-edit="${ei}">Reject</button>
+    </div>`;
+  }
+  return `<div class="chat-edit-card${resolvedCls}">
+    <div class="row-ctx">${rowCtx}</div>
+    <div class="diff"><span class="col">${esc(edit.column)}:</span> <span class="old">${esc(oldValue)}</span> → <span class="new">${esc(edit.newValue)}</span></div>
+    <div class="reason">${esc(edit.reason)}</div>
+    ${body}
+  </div>`;
+}
 
-  const apiMessages = chatMessages
-    .filter(m => !m.pending)
-    .map(m => ({ role: m.role, content: m.text }));
+function renderChatMessages() {
+  let html = "";
+  chatMessages.forEach((m, ti) => {
+    if (m.role === "user") {
+      const block = (m.content || [])[0];
+      if (block && block.type === "text") {
+        html += `<div class="chat-msg user">${esc(block.text)}</div>`;
+      }
+      // A tool_result turn (bookkeeping only) renders nothing — its outcome
+      // is already shown on the resolved proposal card from the turn before it.
+      return;
+    }
+    (m.content || []).forEach((block, bi) => {
+      if (block.type === "text" && block.text) {
+        html += `<div class="chat-msg assistant">${esc(block.text)}</div>`;
+      } else if (block.type === "tool_use" && block.name === "propose_row_edit") {
+        (block.input.edits || []).forEach((edit, ei) => {
+          html += renderChatEditCard(edit, ti, bi, ei);
+        });
+      }
+    });
+  });
+
+  if (chatPending) {
+    html += `<div class="chat-msg user">${esc(chatPending.question)}</div>`;
+    html += `<div class="chat-msg assistant pending">Thinking…</div>`;
+  }
+  if (chatError) {
+    html += `<div class="chat-msg error">Couldn't get an answer: ${esc(chatError.message)} <button type="button" id="chatRetryBtn">Retry</button></div>`;
+  }
+
+  chatMessagesEl.innerHTML = html;
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+
+  const retryBtn = document.getElementById("chatRetryBtn");
+  if (retryBtn) retryBtn.addEventListener("click", () => {
+    const question = chatError.question;
+    chatError = null;
+    askChat(question);
+  });
+
+  const gated = chatHasUnresolvedEdits();
+  chatGateHintEl.style.display = gated ? "block" : "none";
+  chatInputEl.disabled = gated || !!chatPending;
+  chatSendBtn.disabled = gated || !!chatPending;
+}
+
+// Appends the synthetic tool_result turn once every edit proposed in
+// assistant turn `ti` has been resolved (Applied/Rejected/errored) — the
+// Messages API requires a tool_result before the next user turn can be
+// sent, so this must happen before the chat input re-enables.
+function chatMaybeCloseToolTurn(ti) {
+  const turn = chatMessages[ti];
+  if (!turn || turn.role !== "assistant") return;
+  const toolUseBlocks = (turn.content || []).filter(b => b.type === "tool_use" && b.name === "propose_row_edit");
+  if (!toolUseBlocks.length) return;
+  const allResolved = toolUseBlocks.every(b => (b.input.edits || []).every(ed => !!ed._status));
+  if (!allResolved) return;
+  // Already closed (e.g. a second click racing in before re-render) — don't duplicate.
+  const next = chatMessages[ti + 1];
+  if (next && next.role === "user" && (next.content || [])[0]?.type === "tool_result") return;
+
+  const resultBlocks = toolUseBlocks.map(b => {
+    const summary = (b.input.edits || [])
+      .map(ed => `${ed.column} on row ${ed.rowId}: ${ed._status}${ed._status === "error" ? ` (${ed._errorMessage})` : ""}`)
+      .join("; ");
+    return { type: "tool_result", tool_use_id: b.id, content: summary || "No edits." };
+  });
+  chatMessages.splice(ti + 1, 0, { role: "user", content: resultBlocks });
+}
+
+chatMessagesEl.addEventListener("click", e => {
+  const btn = e.target.closest("[data-chat-apply], [data-chat-reject]");
+  if (!btn) return;
+  const ti = Number(btn.dataset.turn);
+  const bi = Number(btn.dataset.block);
+  const ei = Number(btn.dataset.edit);
+  const edit = chatMessages[ti]?.content?.[bi]?.input?.edits?.[ei];
+  if (!edit || edit._status) return;
+
+  if (btn.hasAttribute("data-chat-apply")) {
+    const row = allRows.find(r => r.__id === edit.rowId);
+    if (!row) {
+      edit._status = "error";
+      edit._errorMessage = "Row no longer exists";
+    } else if (!SCHEMA.includes(edit.column)) {
+      edit._status = "error";
+      edit._errorMessage = "Not an editable column";
+    } else {
+      edit._appliedFrom = row[edit.column];
+      commitCellEdit(row, edit.column, edit.newValue);
+      renderTable(searchEl.value);
+      renderStats(allRows);
+      renderWarnings(allRows);
+      edit._status = "applied";
+    }
+  } else {
+    edit._status = "rejected";
+  }
+
+  chatMaybeCloseToolTurn(ti);
+  renderChatMessages();
+});
+
+async function askChat(question) {
+  chatPending = { question };
+  renderChatMessages();
 
   const body = JSON.stringify({
     model: "claude-sonnet-5",
     max_tokens: 1500,
     system: buildChatSystemBlocks(),
-    messages: apiMessages
+    tools: [buildProposeEditTool()],
+    tool_choice: { type: "auto" },
+    messages: [...chatMessages, { role: "user", content: [{ type: "text", text: question }] }]
   });
 
   let response;
@@ -4278,17 +4480,14 @@ async function askChat(question) {
     }
 
     const data = await response.json();
-    const textBlock = (data.content || []).find(b => b.type === "text");
-    if (!textBlock) throw new Error("Response did not include a text answer.");
+    if (!data.content || !data.content.length) throw new Error("Response did not include an answer.");
 
-    const last = chatMessages[chatMessages.length - 1];
-    last.text = textBlock.text;
-    delete last.pending;
+    chatMessages.push({ role: "user", content: [{ type: "text", text: question }] });
+    chatMessages.push({ role: "assistant", content: data.content });
+    chatPending = null;
   } catch (err) {
-    const last = chatMessages[chatMessages.length - 1];
-    last.text = `Couldn't get an answer: ${err.message}`;
-    delete last.pending;
-    last.error = true;
+    chatPending = null;
+    chatError = { question, message: err.message };
   } finally {
     renderChatMessages();
   }
@@ -4299,19 +4498,14 @@ chatFormEl.addEventListener("submit", async e => {
   const question = chatInputEl.value.trim();
   if (!question) return;
   chatInputEl.value = "";
-  chatSendBtn.disabled = true;
-  chatInputEl.disabled = true;
-  try {
-    await askChat(question);
-  } finally {
-    chatSendBtn.disabled = false;
-    chatInputEl.disabled = false;
-    chatInputEl.focus();
-  }
+  await askChat(question);
+  chatInputEl.focus();
 });
 
 chatClearBtn.addEventListener("click", () => {
   chatMessages = [];
+  chatPending = null;
+  chatError = null;
   renderChatMessages();
 });
 
@@ -4485,6 +4679,8 @@ async function finishRun(documents, totalPages, selectedAi) {
   statusEl.textContent = "Parsing uses and application methods…";
   allRows = [];
   chatMessages = [];
+  chatPending = null;
+  chatError = null;
   renderChatMessages();
   const aiQcReports = [];
 
@@ -4828,6 +5024,8 @@ function formatJobStatusLog(job) {
 function hydrateFromJob(job, runContext) {
   allRows = [];
   chatMessages = [];
+  chatPending = null;
+  chatError = null;
   renderChatMessages();
   const aiQcReports = [];
   job.files.forEach(f => {
