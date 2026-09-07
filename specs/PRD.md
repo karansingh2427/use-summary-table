@@ -3,8 +3,9 @@
 ## 1 · Goal
 
 Pesticide labels are long PDFs that bury crop and use information across many pages. This tool
-reads a whole label and pulls out every crop and every use into one clear table. The table shows
-on screen and downloads as a spreadsheet, so the work takes minutes instead of hours.
+reads a whole label and pulls out every crop and every use into one clear table, in the format
+needed **for EPA submission**. The table shows on screen and downloads as a spreadsheet, so the
+work takes minutes instead of hours.
 
 ## 2 · Who Uses It
 
@@ -17,9 +18,10 @@ Users are not programmers. The tool must work by opening one file and clicking o
 ## 3 · What It Shows
 
 The Use Summary Table documents each product's uses, application methods and rates, and use
-restrictions, **to support ecological exposure modeling**. That purpose drives the schema:
-rates are expressed as active ingredient per acre, and per-crop-cycle and per-year maxima are
-tracked separately.
+restrictions, **in the structured format EPA submission requires**. That structure also supports
+downstream uses such as ecological exposure modeling — but EPA submission is the reason this
+table exists. That purpose drives the schema: rates are expressed as active ingredient per
+acre, and per-crop-cycle and per-year maxima are tracked separately.
 
 **One row = one use + one use site + one set of application instructions.** The same crop
 appears on several rows when it has both a foliar and a soil application, because the rates,

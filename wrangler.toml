@@ -8,6 +8,13 @@
 #
 # Fill in the KV namespace id below after creating it in the dashboard
 # (Workers & Pages -> KV -> Create namespace).
+#
+# AUDIT_LOG is a SEPARATE namespace from JOBS (create a second one) — it
+# holds rate-limit counters, the daily cost-budget counter, and metadata-only
+# audit records (never raw label text), on a longer retention than JOBS'
+# 7-day job-status TTL. Bind the SAME namespace id here and in
+# worker/wrangler.toml so both paths share one cumulative daily total. See
+# functions/api/_lib/governance.js for what it stores.
 
 name = "use-summary-table"
 pages_build_output_dir = "./app"
@@ -17,8 +24,21 @@ compatibility_date = "2026-09-02"
 binding = "JOBS"
 id = "b5b4ba306a6b4539878eca9c4193556b"
 
+[[kv_namespaces]]
+binding = "AUDIT_LOG"
+id = "REPLACE_WITH_AUDIT_LOG_NAMESPACE_ID"
+
 # Pages Functions can only produce to a queue, never consume — the consumer
 # is the standalone Worker in worker/.
 [[queues.producers]]
 binding = "JOBS_QUEUE"
 queue = "use-summary-jobs"
+
+# Non-secret config for functions/api/_lib/governance.js. Safe defaults are
+# baked into the code too, so nothing breaks if these are ever unset — these
+# are placeholders to tune once real numbers exist (real audit-retention
+# policy, real per-day mGA budget for the shared pilot token).
+[vars]
+RATE_LIMIT_PER_MINUTE = "20"
+DAILY_BUDGET_USD = "15"
+AUDIT_TTL_SECONDS = "15552000"

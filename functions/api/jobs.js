@@ -18,6 +18,14 @@
 //
 // A single failed file can be re-enqueued without resubmitting the whole
 // batch via jobs/[id]/retry.js, which reuses the input this function wrote.
+//
+// A kill switch, rate limiting, a daily cost budget precheck, audit logging,
+// and a content-safety flag are handled by _lib/governance.js (requires the
+// AUDIT_LOG KV binding — see wrangler.toml). Token usage itself isn't known
+// yet at submission time — that's recorded once the worker finishes each
+// file (see worker/src/index.js).
+
+import { checkKillSwitch, checkRateLimit, checkBudget, recordAudit, scanForInjectionPhrases } from "./_lib/governance.js";
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const JOB_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -29,6 +37,37 @@ export async function onRequestPost(context) {
   if (!env.PILOT_GATE_SECRET || gate !== env.PILOT_GATE_SECRET) {
     return new Response(JSON.stringify({ error: { message: "Unauthorized" } }), {
       status: 401,
+      headers: { "content-type": "application/json" }
+    });
+  }
+
+  const killSwitch = await checkKillSwitch(env);
+  if (killSwitch.enabled) {
+    await recordAudit(env, { source: "job", status: "blocked_killswitch" });
+    return new Response(JSON.stringify({ error: { message: killSwitch.reason } }), {
+      status: 503,
+      headers: { "content-type": "application/json" }
+    });
+  }
+
+  const rateLimit = await checkRateLimit(env, "jobs");
+  if (!rateLimit.allowed) {
+    await recordAudit(env, { source: "job", status: "blocked_rate_limit" });
+    return new Response(JSON.stringify({
+      error: { message: `Rate limit exceeded (${rateLimit.limit}/min) — wait a moment and retry.` }
+    }), {
+      status: 429,
+      headers: { "content-type": "application/json" }
+    });
+  }
+
+  const budget = await checkBudget(env);
+  if (!budget.allowed) {
+    await recordAudit(env, { source: "job", status: "blocked_budget" });
+    return new Response(JSON.stringify({
+      error: { message: `Daily AI budget exceeded ($${budget.limitUsd}) — try again tomorrow, or ask whoever manages the pilot to raise DAILY_BUDGET_USD.` }
+    }), {
+      status: 429,
       headers: { "content-type": "application/json" }
     });
   }
@@ -124,6 +163,9 @@ export async function onRequestPost(context) {
     // actual text lives only in KV (written above) and the consumer reads
     // it back by jobId + fileIndex.
     await env.JOBS_QUEUE.send({ jobId, fileIndex });
+
+    const flags = scanForInjectionPhrases(pageMarkedText);
+    await recordAudit(env, { source: "job", jobId, fileIndex, status: "queued", flags: flags.length ? flags : undefined });
   } catch (err) {
     return new Response(JSON.stringify({ error: { message: `Could not create job file entry: ${err.message}` } }), {
       status: 502,

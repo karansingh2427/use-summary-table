@@ -9,12 +9,14 @@ No technical background needed.
 
 ## 1 · What this tool is for
 
-Pesticide labels are long PDF documents. The information you usually need — which crops
-the product may be used on, which pests it controls, how much to apply, and how long to
-wait before harvest — is scattered across dozens of pages, sometimes in tables and
-sometimes buried in paragraphs.
+**This tool prepares the Use Summary Table needed for EPA submission.** Pesticide labels
+are long PDF documents. The information that table must document — which crops the
+product may be used on, which pests it controls, how much to apply, and how long to wait
+before harvest — is scattered across dozens of pages, sometimes in tables and sometimes
+buried in paragraphs.
 
-**This tool reads the whole label and pulls all of that into one table.**
+**This tool reads the whole label and pulls all of that into one table**, in the
+structured format EPA submission requires.
 
 You get **one row for every combination of use, use site, and application method** the
 label describes. That means a single crop can produce several rows — if a label allows

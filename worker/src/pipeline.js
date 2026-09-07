@@ -37,10 +37,17 @@ import {
   UNIT_CONVERSIONS_MD,
   GOLDEN_EXAMPLE_V2_TXT
 } from "./knowledge.js";
+import { estimateCostUsd } from "./governance.js";
 
 const MGA_UPSTREAM = "https://chat.int.bayer.com/anthropic/v1/messages";
 const MAX_TOKENS = 64000;
 const REMEDIATION_MAX_CYCLES = 2;
+// Stages 1-2 (extraction, independent QC) stay on Sonnet — cheap, fast,
+// handles most labels. Stage 3 (remediation) escalates to Opus, since QC
+// returning Critical/High is already the pipeline's built-in signal that a
+// label is a hard case worth the stronger (and ~5x pricier) model.
+const MODEL_STANDARD = "claude-sonnet-5";
+const MODEL_ESCALATED = "claude-opus-5";
 const MAX_CHARS = 150000;
 export const JOB_TTL_SECONDS = 7 * 24 * 60 * 60;
 
@@ -290,19 +297,26 @@ function sleep(ms) {
 }
 
 // Reads an Anthropic Messages SSE stream and reassembles it into the same
-// { stop_reason, content } shape the non-streaming API returns, so callers
-// don't need to know the response was streamed.
+// { stop_reason, content } shape the non-streaming API returns, plus a
+// { usage: { inputTokens, outputTokens } } this stream format doesn't
+// otherwise surface directly — message_start carries input_tokens once,
+// message_delta.usage.output_tokens is cumulative (the running total so
+// far, not a per-event delta), so it's overwritten each time rather than
+// summed.
 async function readMessagesStream(response) {
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   const blocksByIndex = new Map();
   let stopReason = null;
   let buffer = "";
+  const usage = { inputTokens: 0, outputTokens: 0 };
 
   const handleEvent = (dataLine) => {
     if (!dataLine) return;
     const evt = JSON.parse(dataLine);
     if (evt.type === "error") {
       throw new Error(evt.error?.message || "mGA stream reported an error event");
+    } else if (evt.type === "message_start") {
+      if (evt.message?.usage?.input_tokens != null) usage.inputTokens = evt.message.usage.input_tokens;
     } else if (evt.type === "content_block_start") {
       blocksByIndex.set(evt.index, { ...evt.content_block, _json: "" });
     } else if (evt.type === "content_block_delta") {
@@ -317,6 +331,7 @@ async function readMessagesStream(response) {
       }
     } else if (evt.type === "message_delta") {
       if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
+      if (evt.usage?.output_tokens != null) usage.outputTokens = evt.usage.output_tokens;
     }
   };
 
@@ -340,12 +355,19 @@ async function readMessagesStream(response) {
   }
 
   const content = [...blocksByIndex.values()].map(({ _json, ...block }) => block);
-  return { stop_reason: stopReason, content };
+  return { stop_reason: stopReason, content, usage };
 }
 
-async function callAnthropic(env, messages, systemBlocks, tools, toolChoiceName) {
+function addUsage(totals, usage, model = MODEL_STANDARD) {
+  if (!usage) return;
+  totals.inputTokens += usage.inputTokens || 0;
+  totals.outputTokens += usage.outputTokens || 0;
+  totals.estCostUsd += estimateCostUsd(usage, model);
+}
+
+async function callAnthropic(env, messages, systemBlocks, tools, toolChoiceName, model = MODEL_STANDARD) {
   const body = JSON.stringify({
-    model: "claude-sonnet-5",
+    model,
     max_tokens: MAX_TOKENS,
     system: systemBlocks,
     messages,
@@ -404,20 +426,21 @@ async function callAnthropic(env, messages, systemBlocks, tools, toolChoiceName)
 }
 
 // Stage 1 — extraction agent: read the label, emit the initial row set.
-async function runExtractionTurn(env, jobId, fileIndex, doc, pageMarkedText, systemBlocks, tools) {
+async function runExtractionTurn(env, jobId, fileIndex, doc, pageMarkedText, systemBlocks, tools, usageTotals) {
   await reportStage(env, jobId, fileIndex, "extraction (stage 1/3)");
   const stageText = "Read the entire label above and emit one row per use + use site + application method, per the rules and schema in the system prompt.";
   const messages = [
     { role: "user", content: buildDocMessageBlocks(doc, pageMarkedText, stageText) }
   ];
   const { data, toolUse } = await callAnthropic(env, messages, systemBlocks, tools, "emit_use_summary_rows");
+  addUsage(usageTotals, data.usage);
   messages.push({ role: "assistant", content: data.content });
   return { messages, rawRows: toolUse.input?.rows || [], lastToolUseId: toolUse.id };
 }
 
 // Stage 2 — QC agent: a fresh conversation, independent of the extractor's
 // own reasoning, auditing the initial row set against the label text.
-async function runQcTurn(env, jobId, fileIndex, rawRows, doc, pageMarkedText, systemBlocks, tools) {
+async function runQcTurn(env, jobId, fileIndex, rawRows, doc, pageMarkedText, systemBlocks, tools, usageTotals) {
   await reportStage(env, jobId, fileIndex, "independent QC review (stage 2/3)");
   const stageText = [
     "You are now acting as an independent QC reviewer — a senior regulatory manager auditing someone else's extraction, not the person who produced it. Run all 5 passes: structural (schema compliance, no blanks), column-wise plausibility, row-wise verification against the label text above, completeness (every crop/use/method the label states, R-17/R-21/R-25), and confidence calibration.",
@@ -428,6 +451,7 @@ async function runQcTurn(env, jobId, fileIndex, rawRows, doc, pageMarkedText, sy
     { role: "user", content: buildDocMessageBlocks(doc, pageMarkedText, stageText) }
   ];
   const { data, toolUse } = await callAnthropic(env, messages, systemBlocks, tools, "emit_qc_report");
+  addUsage(usageTotals, data.usage);
   messages.push({ role: "assistant", content: data.content });
   return { messages, qcReport: toolUse.input || { overall: "Clean", defects: [] }, lastToolUseId: toolUse.id };
 }
@@ -435,14 +459,14 @@ async function runQcTurn(env, jobId, fileIndex, rawRows, doc, pageMarkedText, sy
 // Stage 3 — bounded remediation loop: only engages when QC found Critical/
 // High defects, and never blocks — whatever the final QC report says, rows
 // and report both flow through to the result written to KV.
-async function runRemediationLoop(env, jobId, fileIndex, state, rawRows, systemBlocks, tools) {
+async function runRemediationLoop(env, jobId, fileIndex, state, rawRows, systemBlocks, tools, usageTotals) {
   let { messages, qcReport, lastToolUseId } = state;
   let cycle = 0;
   const needsFix = r => r && (r.overall === "Critical" || r.overall === "High");
   while (needsFix(qcReport) && cycle < REMEDIATION_MAX_CYCLES) {
     cycle++;
     await reportStage(env, jobId, fileIndex, `remediating (stage 3/3, cycle ${cycle}/${REMEDIATION_MAX_CYCLES})`);
-    console.log(`remediation cycle ${cycle}/${REMEDIATION_MAX_CYCLES}: ${(qcReport.defects || []).length} defect(s) (${qcReport.overall}) — correcting…`);
+    console.log(`remediation cycle ${cycle}/${REMEDIATION_MAX_CYCLES}: ${(qcReport.defects || []).length} defect(s) (${qcReport.overall}) — escalating to Opus to correct…`);
     messages.push({
       role: "user",
       content: [
@@ -453,7 +477,8 @@ async function runRemediationLoop(env, jobId, fileIndex, state, rawRows, systemB
         }
       ]
     });
-    const corr = await callAnthropic(env, messages, systemBlocks, tools, "emit_use_summary_rows");
+    const corr = await callAnthropic(env, messages, systemBlocks, tools, "emit_use_summary_rows", MODEL_ESCALATED);
+    addUsage(usageTotals, corr.data.usage, MODEL_ESCALATED);
     messages.push({ role: "assistant", content: corr.data.content });
     rawRows = corr.toolUse.input?.rows || rawRows;
 
@@ -465,15 +490,16 @@ async function runRemediationLoop(env, jobId, fileIndex, state, rawRows, systemB
         { type: "text", text: "Re-run the full 5-pass QC review against the corrected rows." }
       ]
     });
-    const recheck = await callAnthropic(env, messages, systemBlocks, tools, "emit_qc_report");
+    const recheck = await callAnthropic(env, messages, systemBlocks, tools, "emit_qc_report", MODEL_ESCALATED);
+    addUsage(usageTotals, recheck.data.usage, MODEL_ESCALATED);
     messages.push({ role: "assistant", content: recheck.data.content });
     qcReport = recheck.toolUse.input || qcReport;
     lastToolUseId = recheck.toolUse.id;
   }
   console.log(cycle > 0
-    ? `remediation complete after ${cycle} cycle(s) — final QC status: ${qcReport.overall}.`
+    ? `remediation complete after ${cycle} cycle(s) on Opus — final QC status: ${qcReport.overall}.`
     : `QC review: ${qcReport.overall}${(qcReport.defects || []).length ? ` (${qcReport.defects.length} defect(s), below remediation threshold)` : " — clean"}.`);
-  return { rawRows, qcReport };
+  return { rawRows, qcReport, cycles: cycle };
 }
 
 // R-16 safety net — collapse rows that are outright duplicates across every
@@ -524,17 +550,18 @@ export async function extractWithLLM(env, jobId, fileIndex, doc, pageMarkedText)
 
   const systemBlocks = buildSystemBlocks();
   const tools = buildTools();
+  const usageTotals = { inputTokens: 0, outputTokens: 0, estCostUsd: 0 };
 
   console.log(`${doc.fileName} — stage 1/3 — extraction…`);
-  const extraction = await runExtractionTurn(env, jobId, fileIndex, doc, pageMarkedText, systemBlocks, tools);
+  const extraction = await runExtractionTurn(env, jobId, fileIndex, doc, pageMarkedText, systemBlocks, tools, usageTotals);
   console.log(`${doc.fileName} — ${extraction.rawRows.length} row(s) from initial extraction`);
 
   console.log(`${doc.fileName} — stage 2/3 — independent QC review…`);
-  const qc = await runQcTurn(env, jobId, fileIndex, extraction.rawRows, doc, pageMarkedText, systemBlocks, tools);
+  const qc = await runQcTurn(env, jobId, fileIndex, extraction.rawRows, doc, pageMarkedText, systemBlocks, tools, usageTotals);
 
   console.log(`${doc.fileName} — stage 3/3 — bounded remediation (up to ${REMEDIATION_MAX_CYCLES} cycle(s))…`);
-  const remediated = await runRemediationLoop(env, jobId, fileIndex, qc, extraction.rawRows, systemBlocks, tools);
+  const remediated = await runRemediationLoop(env, jobId, fileIndex, qc, extraction.rawRows, systemBlocks, tools, usageTotals);
 
   const rows = buildAppRows(remediated.rawRows, doc);
-  return { rows, qcReport: remediated.qcReport };
+  return { rows, qcReport: remediated.qcReport, usage: usageTotals, remediationCycles: remediated.cycles };
 }

@@ -1,0 +1,60 @@
+{
+  "_comment": "Governance descriptor for Bayer's AI Pre-Flight checklist ('Create the Agent Card') and any future Agent Hub registration decision. Loosely modeled on the A2A Agent Card shape (name/description/provider/capabilities/skills), but this tool does not run a live A2A JSON-RPC endpoint or serve this file at /.well-known/agent.json — see discoverability.note below.",
+  "name": "use-summary-table-extractor",
+  "displayName": "Use Summary Tables Extractor",
+  "version": "0.1.0-pilot",
+  "status": "pilot",
+  "lastReviewed": "2026-09-08",
+  "description": "Extracts a structured, schema-compliant Use Summary Table (28 columns) from a single pesticide product-label PDF, for EPA submission. Task-based, not process- or goal-based: one document type in, one table out, no open-ended planning or autonomous action beyond that single extraction task.",
+  "owner": {
+    "name": "Karandeep Singh",
+    "email": "karandeep.singh@bayer.com",
+    "organization": "Bayer"
+  },
+  "provider": {
+    "organization": "Bayer"
+  },
+  "scope": {
+    "inputs": "One pesticide product-label PDF at a time (text layer via PDF.js, with optional Tesseract.js OCR fallback for scanned/image-only pages)",
+    "outputs": "28-column schema-compliant Use Summary Table (see knowledge/schema-reference.md for the authoritative column list; app/index.html's SCHEMA constant is the source of truth), rendered on screen and downloadable as .xlsx",
+    "notInScope": [
+      "No autonomous submission of results to EPA or any external system",
+      "No write access to anything beyond generating a local/downloadable file",
+      "No batch cross-label reasoning — every label is extracted independently",
+      "No action taken on the extracted data without a human explicitly exporting it"
+    ]
+  },
+  "skills": [
+    {
+      "id": "extract-use-summary-table",
+      "name": "Extract Use Summary Table from pesticide label PDF",
+      "description": "Given one label PDF, identifies every crop/use-site + application-method combination and fills all 28 schema columns (product identity, site, application method, rate pattern, restrictions) per knowledge/extraction-rules.md and knowledge/schema-reference.md. Cells are never left blank: NS (Not Specified) when the label is silent, NA (Not Applicable) when the column does not apply, never inferred or borrowed from another row/label.",
+      "tags": ["pesticide-label-extraction", "EPA-submission", "regulatory-data", "document-extraction"],
+      "inputModes": ["application/pdf"],
+      "outputModes": ["application/json", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]
+    }
+  ],
+  "autonomy": {
+    "level": "human-in-the-loop",
+    "description": "Every extracted row is reviewed by a human in the app's table view before export — there is no automatic export or downstream action. AI-proposed edits made through the in-app chat also require the user to explicitly click Apply; nothing is written to the table without that explicit action."
+  },
+  "model": {
+    "provider": "Anthropic (Claude), via Bayer's internal myGenAssist (mGA) gateway",
+    "modelId": "claude-sonnet-5",
+    "accessRoute": "https://chat.int.bayer.com (mGA), never called directly from the browser — see functions/api/extract.js and worker/src/pipeline.js"
+  },
+  "security": {
+    "authentication": "Shared pilot secret header (x-ust-pilot / PILOT_GATE_SECRET) — acknowledged as a stopgap for a small pilot, not a durable auth boundary; a real Entra Agent ID managed identity is required before any broader rollout (see README.md's DSE-app route).",
+    "killSwitch": "A KV-flag emergency stop (killswitch:enabled) checked before every AI call on both the interactive and background paths — disables extraction within seconds, no redeploy required. See README.md's 'Monitoring, audit trail & cost controls' section.",
+    "rateLimiting": "Best-effort per-minute cap, default 20/min (RATE_LIMIT_PER_MINUTE).",
+    "dailyCostBudget": "Cumulative daily cap on estimated spend, default $15 (DAILY_BUDGET_USD) — a placeholder pending the shared token's real budget.",
+    "auditTrail": "Metadata-only record (timestamp, status, duration, estimated token usage/cost — never raw label text) per call, retained 180 days by default (AUDIT_TTL_SECONDS).",
+    "contentSafety": "Flag-only heuristic scan for prompt-injection-style phrases in label text; never blocks extraction, only flags the audit record for human review.",
+    "driftTracking": "The independent QC agent's severity verdict and remediation-cycle count are written into the audit trail for every document (both paths); scripts/check-drift.py is run on demand to compare a recent trailing window against the prior one and flag rising High/Critical share or remediation cycles. Detection only — no automatic action; correction stays a human decision. See README.md's 'Agent drift tracking' section."
+  },
+  "discoverability": {
+    "a2aCompliant": false,
+    "mcpExposed": false,
+    "note": "This file is an internal governance descriptor only, authored to close the AI Pre-Flight checklist's 'Create the Agent Card' item ahead of any Agent Hub registration decision. The tool does not currently serve this (or any) agent-card file at a public discovery URL such as /.well-known/agent.json, and does not run a live A2A JSON-RPC or MCP endpoint — it is a browser-based app with a gated relay function, not a registry-discoverable agent service."
+  }
+}

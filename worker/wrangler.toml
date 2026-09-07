@@ -11,8 +11,11 @@
 #   2. Set MGA_TOKEN as an encrypted secret on THIS Worker project (separate
 #      secret store from the Pages project's copy, even though it's the same
 #      token value): `wrangler secret put MGA_TOKEN` from this folder.
-#   3. Bind the same KV namespace used by the Pages project (fill in the id
-#      below).
+#   3. Bind the same KV namespaces used by the Pages project (fill in the
+#      ids below) — JOBS and AUDIT_LOG must be the SAME namespace ids as
+#      root wrangler.toml's, so job records and the rate-limit/budget/audit
+#      counters in AUDIT_LOG are shared across both the interactive and
+#      background paths.
 #   4. Confirm the queue consumer binding below took effect after first
 #      deploy (Workers & Pages -> this project -> Settings -> Triggers).
 
@@ -24,7 +27,20 @@ compatibility_date = "2026-09-02"
 binding = "JOBS"
 id = "b5b4ba306a6b4539878eca9c4193556b"
 
+[[kv_namespaces]]
+binding = "AUDIT_LOG"
+id = "REPLACE_WITH_AUDIT_LOG_NAMESPACE_ID"
+
 [[queues.consumers]]
 queue = "use-summary-jobs"
 max_batch_size = 1
 max_concurrency = 2
+
+# Non-secret config for src/governance.js. Safe defaults are baked into the
+# code too, so nothing breaks if these are ever unset. Keep these in sync
+# with the root wrangler.toml's [vars] — both paths should use the same
+# limits since they share the AUDIT_LOG counters.
+[vars]
+RATE_LIMIT_PER_MINUTE = "20"
+DAILY_BUDGET_USD = "15"
+AUDIT_TTL_SECONDS = "15552000"

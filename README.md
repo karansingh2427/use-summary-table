@@ -2,9 +2,10 @@
 
 ## Problem
 
-Pesticide label PDFs contain critical use information scattered across narrative sections,
-rate tables, crop tables, and appendices. Regulators, applicators, and analysts need this
-data in a **structured, queryable format** — not embedded in unstructured PDF text.
+**Purpose: preparing the Use Summary Table required for EPA submission.** Pesticide label
+PDFs contain the use information that table must document — scattered across narrative
+sections, rate tables, crop tables, and appendices, not in the structured, queryable format
+EPA submission requires.
 
 **Manual extraction is:**
 - **Time-consuming**: 45–90 min per label
@@ -12,9 +13,10 @@ data in a **structured, queryable format** — not embedded in unstructured PDF 
 - **Inconsistent**: Different analysts may interpret the same label differently
 
 **This tool solves the problem** by automating the extraction of every crop, use site, and
-application method into a 27-column schema-compliant table, with human verification built in.
+application method into a 28-column schema-compliant table, with human verification built in.
 
-The output is ready to load into regulatory databases or analysis systems — **no reformatting needed**.
+The output is ready **for EPA submission** or to load into regulatory databases or analysis
+systems — **no reformatting needed**.
 
 ## Solution
 
@@ -41,7 +43,7 @@ The extractor uses a **regex + heuristic pipeline** running entirely client-side
 graph LR
     A["PDF Upload<br/>(one or more)"] -->|PDF.js| B["Text Extraction<br/>(per-page text)"]
     B -->|Regex Patterns| C["Field Parser<br/>(60+ patterns)"]
-    C -->|Derivation Rules| D["Schema Mapping<br/>(27 columns)"]
+    C -->|Derivation Rules| D["Schema Mapping<br/>(28 columns)"]
     D -->|Confidence Scoring| E["Validation<br/>(High/Med/Low)"]
     E -->|Human Review| F["Inline Editing<br/>(double-click cells)"]
     F -->|SheetJS| G["Export<br/>(Excel/CSV)"]
@@ -158,7 +160,69 @@ the wider team needs the DSE-app route instead (a real service-account credentia
 ITLM governance review at `go/beat`, and an Agent Hub listing) — a separate, larger
 undertaking.
 
+### Monitoring, audit trail & cost controls
+
+Both AI paths (the interactive relay above and the background-job worker below) share a
+small governance layer (`functions/api/_lib/governance.js`, duplicated at
+`worker/src/governance.js`) backed by a second KV namespace, `AUDIT_LOG`:
+
+- **Kill switch** — a single KV flag that disables both AI paths in seconds, no redeploy:
+  `wrangler kv key put --namespace-id=<AUDIT_LOG_ID> "killswitch:enabled" "true"` (and
+  optionally `"killswitch:reason" "..."` for the message shown to users). A request in
+  flight when it's flipped still completes; every request after that gets a clear 503
+  until it's cleared with `wrangler kv key delete --namespace-id=<AUDIT_LOG_ID>
+  "killswitch:enabled"`. Fails open on a KV outage, same as the other checks below.
+- **Rate limiting** — a best-effort per-minute cap (`RATE_LIMIT_PER_MINUTE`, default 20)
+  on both `/api/extract` and `/api/jobs`, to catch a runaway loop or accidental hammering
+  of the shared mGA token. KV has no atomic increment, so this is approximate, not an
+  adversarial-proof guarantee.
+- **Daily cost budget** — a cumulative daily token/cost counter (`DAILY_BUDGET_USD`,
+  default $15 — a placeholder; tune it to the shared token's real monthly allowance).
+  Once exceeded, both paths refuse new work with a clear message rather than silently
+  draining a colleague's personal mGA budget.
+- **Audit trail** — one metadata-only record per call (timestamp, source, status,
+  duration, estimated token usage/cost — never raw label text or PII), retained for
+  `AUDIT_TTL_SECONDS` (default 180 days, a placeholder pending a real retention policy).
+  Read it via `wrangler kv key list --binding=AUDIT_LOG` — there's no viewer UI.
+- **Content-safety flag** — a coarse, flag-only scan for prompt-injection-style phrases
+  in incoming label text. A match never blocks extraction (false positives on real labels
+  are likely); it's recorded on that call's audit record for human review. The real
+  defense stays the existing human-in-the-loop row review before export.
+- **Model escalation** — extraction (stage 1) and independent QC (stage 2) run on
+  `claude-sonnet-5`; if QC comes back Critical or High, the bounded remediation loop
+  (stage 3) escalates to `claude-opus-5` for its correction + recheck calls — that QC
+  verdict is already the pipeline's built-in signal that a label is a hard case, so only
+  those calls pay Opus's price rather than every label. Cost estimates are priced per
+  call at whichever model actually ran it (`estimateCostUsd(usage, model)`), not one
+  blended Sonnet-only rate, so the daily budget above stays accurate for a file whose
+  remediation escalated.
+
+None of this fixes the pilot gate itself being a shared secret visible in client-side JS
+(`PILOT_GATE_HEADER_VALUE` in `app/index.html`) — that's a real-auth gap (Entra Agent ID)
+that needs the DSE-app route above, not something a KV counter can close.
+
 **See [DEPLOYMENT.md](DEPLOYMENT.md) for full Cloudflare Pages setup instructions.**
+
+### Agent drift tracking
+
+Bayer's AI Pre-Flight "Golden Standard & Guardrails" checklist asks for agent drift to be
+detected and corrected over time — scope creep and output degradation. For this tool
+(one label in, one table out, no memory across documents), the concrete signal is the
+independent QC agent's own severity verdict (`Clean`/`Low`/`Medium`/`High`/`Critical`) and
+how many remediation cycles it took to resolve, per document — both already computed by
+the pipeline, and now written into the same `AUDIT_LOG` trail as everything else above:
+the background-job worker includes `qcOverall`/`remediationCycles` on its existing audit
+record, and the interactive path reports the same fields from the browser via a small new
+endpoint, `functions/api/qc-summary.js` (gated by the same pilot secret; no kill-switch/
+budget checks since it isn't an mGA call and costs nothing).
+
+Run `python3 scripts/check-drift.py` to compare a recent trailing window (default: last 7
+days) against the window before it — severity mix, average remediation cycles, and
+content-safety flag counts — and print a "review needed" line if High/Critical share or
+remediation cycles rose materially. This is on-demand for this pilot: no schedule, no
+alerting channel, and no automatic action — it's a flag for a human to look into (an
+mGA-side model change, a knowledge-file regression, an unusual batch of hard labels), and
+correction always stays a human decision, same as the QC gate itself.
 
 ## Background jobs (batch mode)
 
@@ -188,8 +252,9 @@ See the comments at the top of `wrangler.toml` and `worker/wrangler.toml` for th
 
 ## Output schema
 
-The 27-column Use Summary Table defined in `knowledge/UST_definitions.txt`. Column meanings
-are in `knowledge/schema-reference.md`; `SCHEMA` in `app/index.html` is authoritative.
+The 28-column Use Summary Table defined in `knowledge/UST_definitions.txt`, in the structure
+required for EPA submission. Column meanings are in `knowledge/schema-reference.md`; `SCHEMA`
+in `app/index.html` is authoritative.
 
 **One row = one use + one use site + one application method.** A crop with both a foliar and
 a soil application produces two rows, because the rates, intervals, and restrictions differ.
@@ -300,12 +365,13 @@ Both need the sample label PDFs described in `samples/README.md`.
 - SCHEMA as single source of truth for columns
 - Consistent pattern naming (e.g., `FIELD_PATTERNS.driftRestrictions`)
 
-### 3. Why a 27-Column Schema?
+### 3. Why a 28-Column Schema?
 
 **Decision**: Fixed schema defined in `knowledge/UST_definitions.txt`.
 
 **Rationale**:
-- **Regulatory alignment** — matches EPA Form 8570 and standard industry tables
+- **Built for EPA submission** — matches EPA Form 8570 and standard industry tables; this is
+  the schema EPA submission requires, not an arbitrary internal format
 - **Queryable** — enables consistent database loading
 - **Unambiguous** — no interpretation of column meanings
 - **Derivable** — some columns computed from others (e.g., Max # Apps/Yr from Total Rate/Yr ÷ Single Rate)

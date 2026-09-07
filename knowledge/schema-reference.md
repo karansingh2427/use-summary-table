@@ -7,6 +7,9 @@ and `SCHEMA` ever disagree, `SCHEMA` wins and this file must be corrected.
 
 ## Purpose
 
+**This table is prepared for EPA submission.** `UST_definitions.txt` frames the same
+requirement in terms of the downstream analysis it enables:
+
 > To accurately document each product's uses, application methods and rates, and use
 > restrictions **to facilitate ecological exposure modeling**.
 > — `UST_definitions.txt`
