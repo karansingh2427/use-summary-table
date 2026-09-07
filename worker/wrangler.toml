@@ -29,7 +29,7 @@ id = "b5b4ba306a6b4539878eca9c4193556b"
 
 [[kv_namespaces]]
 binding = "AUDIT_LOG"
-id = "REPLACE_WITH_AUDIT_LOG_NAMESPACE_ID"
+id = "039b547f3edb4752adda83a97470c9ff"
 
 [[queues.consumers]]
 queue = "use-summary-jobs"
