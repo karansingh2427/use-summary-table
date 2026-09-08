@@ -224,6 +224,58 @@ alerting channel, and no automatic action — it's a flag for a human to look in
 mGA-side model change, a knowledge-file regression, an unusual batch of hard labels), and
 correction always stays a human decision, same as the QC gate itself.
 
+### Cyber security guardrails
+
+Bayer's AI Pre-Flight checklist also asks for protection against prompt injection, data
+exfiltration, and unauthorized access, plus least-privilege scoping. Some of this was
+already true by construction; this section makes it explicit, plus closes one concrete
+gap (no CSP) and documents what's knowingly out of scope for a pilot this size.
+
+- **Prompt injection** — the extraction system prompt (identical in `app/index.html` and
+  `worker/src/pipeline.js`) now explicitly instructs the model to treat label text as data
+  to extract from, never as instructions to follow, in addition to the existing
+  never-invent-a-value framing. This layers on top of two mitigations that already
+  existed: the content-safety flag above (flags a suspicious phrase for human review,
+  never blocks), and the interactive chat feature's `propose_row_edit` tool, which can
+  never write to a row directly — every proposed edit requires an explicit human Apply
+  click. No single point of failure; correction stays human at every layer.
+- **Data exfiltration** — both `_headers` files now set a Content-Security-Policy, most
+  importantly `connect-src 'self'`: any injected/rogue code (from a compromised
+  dependency or a successful prompt injection) cannot make the browser call out to an
+  attacker-controlled origin. This was already close to true — the app never calls
+  Bayer's mGA gateway directly from the browser (every AI call is relayed through
+  same-origin `/api/extract`, so no per-user mGA credential is ever exposed client-side),
+  audit records are metadata-only and never contain raw label text, and there are zero
+  third-party/CDN scripts anywhere — everything under `app/vendor/` is a committed local
+  file. The CSP also sets `script-src`/`style-src 'self' 'unsafe-inline'` (needed for this
+  app's single inline `<script>`/`<style>` block — no build step, see Design Decision #2
+  below), `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, and
+  `form-action 'self'`. See `app/vendor/README.md` for a note on how this CSP interacts
+  with Tesseract.js's default CDN fetch for trained-data.
+- **Unauthorized access** — unchanged from the existing, already-documented caveat just
+  above: the pilot gate (`PILOT_GATE_HEADER_VALUE`/`PILOT_GATE_SECRET`) is a shared static
+  secret, an accepted stopgap for a 2-3 person pilot, not real per-user authentication. A
+  broader rollout needs the DSE-app route with an Entra Agent ID managed identity first.
+- **Least privilege** — the browser itself holds no credentials at all (no `MGA_TOKEN`, no
+  KV access) — every privileged operation happens server-side. Within the server side,
+  though, both the Pages Functions project and the standalone Worker each hold the full
+  `JOBS` + `AUDIT_LOG` KV binding pair and their own `MGA_TOKEN` copy — Cloudflare Pages
+  Functions share one binding set project-wide, so finer per-function scoping (e.g.
+  `qc-summary.js` only ever needs `AUDIT_LOG`) would require splitting functions into
+  separate Worker projects. Documented as a known gap, not solved — out of scope at this
+  pilot's scale.
+- **Dependency / secret scanning** — no `package.json` exists anywhere (pure vanilla
+  JS/HTML/CSS, no npm dependency tree to scan); the vendored libraries under `app/vendor/`
+  (PDF.js, SheetJS, Tesseract.js) have no automated version/CVE tracking — updating them is
+  a manual responsibility. No secret-scanning tool runs in CI. Documented as an accepted
+  gap for this pilot's scale, same treatment as the pilot-gate secret above, rather than
+  adding new tooling.
+- A clarifying note on deploy targets: `.github/workflows/deploy.yml` deploys this repo to
+  GitHub Pages, a secondary/legacy target from earlier in this project's life. The live
+  production site is Cloudflare Pages (`app/` + `functions/api/*`) plus the standalone
+  Worker (`worker/`), both auto-deployed from a `git push` via Cloudflare's own git
+  integration — that's the deploy path this and the sections above actually describe.
+
 ## Background jobs (batch mode)
 
 The in-tab AI pipeline above needs the browser tab to stay open for the whole run — fine for

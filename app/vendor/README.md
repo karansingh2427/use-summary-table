@@ -28,3 +28,10 @@ curl -L -o app/vendor/tesseract.min.js \
 On first use Tesseract fetches its English trained-data file and caches it in the browser.
 For a fully offline setup, also download the worker, core, and `eng.traineddata.gz` files and
 point `Tesseract.createWorker` at local paths in `app/index.html`.
+
+**Note:** the app's CSP (`_headers`, `connect-src 'self'`) blocks Tesseract's default
+CDN fetch for that trained-data file (normally `cdn.jsdelivr.net`) — this is
+deliberate, closing a data-exfiltration path, but it means OCR will fail to fetch
+language data unless the fully offline setup above (local `langPath`/`corePath`/
+`workerPath`) is completed. If OCR silently fails after enabling it, check the
+browser console for a CSP violation on a jsdelivr URL first.
