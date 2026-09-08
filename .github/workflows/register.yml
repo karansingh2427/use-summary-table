@@ -1,0 +1,177 @@
+name: Agenthub Register Agent
+
+# Example workflow for teams declaring a non-A2A agent: re-declares this repo's
+# agent with the Agent Registry on every push to `main`. Copy this file into
+# your own repo's .github/workflows/ (adjusting the `branches` trigger below if
+# your default branch isn't `main`) and agenthub-agent.yaml to the repository
+# root, or anywhere else if you point MANIFEST_PATH below at it. Every field is
+# documented inline in the manifest.
+#
+# Requires:
+#   vars.AGENTHUB_API_URL   Base URL of the Agent Registry API
+#   secrets.AGENTHUB_TOKEN  Agent Registry PAT (ahub_...)
+#
+# Each field resolves in this order:
+#   1. the manifest — the baseline. Declaring everything there is a complete
+#      setup; the variables below are optional.
+#   2. matching AGENT_* Actions variable — applies only when set and non-empty:
+#      AGENT_NAME, AGENT_DESCRIPTION, AGENT_OWNER, AGENT_OWNER_EMAIL,
+#      AGENT_VIEWING_URL, AGENT_ENDPOINT_URL, AGENT_VERSION, AGENT_ID,
+#      AGENT_DIVISION, AGENT_BEAT_ID, AGENT_LIFECYCLE_STATUS
+#   3. repo_url and source — always set by this workflow. They must not appear
+#      in the manifest and cannot be overridden.
+#
+# Use overrides only for values tied to one deployment, e.g. a prod-only
+# viewing_url. Define them as repository variables, or scope them to a
+# GitHub Environment by adding `environment: <name>` to the jobs below.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Relative to the repository root. Move the manifest wherever suits you,
+  # and change this to match.
+  MANIFEST_PATH: agenthub-agent.yaml
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify connectivity to Agent Registry
+        env:
+          AGENTHUB_API_URL: ${{ vars.AGENTHUB_API_URL }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$AGENTHUB_API_URL" ]]; then
+            echo "AGENTHUB_API_URL is not configured as an Actions variable" >&2
+            exit 1
+          fi
+
+          response_path="$RUNNER_TEMP/agent-registry-health-response.txt"
+          http_status=$(curl --silent --show-error \
+            --output "$response_path" \
+            --write-out "%{http_code}" \
+            --connect-timeout 10 \
+            --max-time 30 \
+            "${AGENTHUB_API_URL%/}/api/v1/utils/health-check/")
+
+          cat "$response_path"
+          echo
+          if [[ "$http_status" -ne 200 ]]; then
+            echo "Agent Registry health check failed with HTTP ${http_status}" >&2
+            exit 1
+          fi
+
+          echo "Agent Registry is reachable"
+
+  declare:
+    needs: health-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build declaration payload
+        env:
+          AGENT_NAME: ${{ vars.AGENT_NAME }}
+          AGENT_DESCRIPTION: ${{ vars.AGENT_DESCRIPTION }}
+          AGENT_OWNER: ${{ vars.AGENT_OWNER }}
+          AGENT_OWNER_EMAIL: ${{ vars.AGENT_OWNER_EMAIL }}
+          AGENT_VIEWING_URL: ${{ vars.AGENT_VIEWING_URL }}
+          AGENT_ENDPOINT_URL: ${{ vars.AGENT_ENDPOINT_URL }}
+          AGENT_VERSION: ${{ vars.AGENT_VERSION }}
+          AGENT_ID: ${{ vars.AGENT_ID }}
+          AGENT_DIVISION: ${{ vars.AGENT_DIVISION }}
+          AGENT_BEAT_ID: ${{ vars.AGENT_BEAT_ID }}
+          AGENT_LIFECYCLE_STATUS: ${{ vars.AGENT_LIFECYCLE_STATUS }}
+        run: |
+          set -euo pipefail
+
+          # Two unrelated programs are called yq; this needs mikefarah's Go v4.
+          if ! yq --version 2>/dev/null | grep -q mikefarah; then
+            echo "mikefarah/yq v4 is required (preinstalled on GitHub-hosted runners)" >&2
+            exit 1
+          fi
+
+          yq -o=json '.' "$MANIFEST_PATH" | jq --slurp '
+              [
+                "name", "description", "owner", "owner_email", "viewing_url",
+                "agent_id", "version", "endpoint_url", "division", "beat_id",
+                "lifecycle_status"
+              ] as $fields
+
+              | if length != 1
+                then error("manifest must hold exactly one YAML document, found \(length)")
+                else .[0]
+                end
+              | if type != "object" then error("manifest must be a JSON object") else . end
+              | (keys - $fields) as $unsupported
+              | if $unsupported != []
+                then error("unsupported manifest fields: \($unsupported | join(", "))")
+                else .
+                end
+              | [to_entries[] | select(.value | type != "string") | .key] as $unquoted
+              | if $unquoted != []
+                then error("manifest values must be quoted strings: \($unquoted | join(", "))")
+                else .
+                end
+
+              # A non-empty AGENT_<FIELD> wins; agent_id reads AGENT_ID, not AGENT_AGENT_ID.
+              | reduce $fields[] as $field (.;
+                  ($ENV["AGENT_" + ($field | ascii_upcase | sub("^AGENT_"; ""))] // ""
+                   | gsub("^\\s+|\\s+$"; "")) as $value
+                  | if $value == "" then . else .[$field] = $value end)
+
+              | [to_entries[]
+                 | select(.value | test("^\\s*<.*>\\s*$"))
+                 | .key] as $placeholders
+              | if $placeholders != []
+                then error("replace or remove placeholder fields: \($placeholders | join(", "))")
+                else .
+                end
+              | .repo_url = "https://github.com/" + $ENV.GITHUB_REPOSITORY
+              | .source = "manual-cicd"
+            ' > "$RUNNER_TEMP/agent-declaration.json"
+
+      - name: Declare agent
+        env:
+          AGENTHUB_API_URL: ${{ vars.AGENTHUB_API_URL }}
+          AGENTHUB_TOKEN: ${{ secrets.AGENTHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$AGENTHUB_API_URL" ]]; then
+            echo "AGENTHUB_API_URL is not configured as an Actions variable" >&2
+            exit 1
+          fi
+          if [[ -z "$AGENTHUB_TOKEN" ]]; then
+            echo "AGENTHUB_TOKEN is not configured as an Actions secret" >&2
+            exit 1
+          fi
+
+          response_path="$RUNNER_TEMP/agent-declaration-response.json"
+          http_status=$(curl --silent --show-error \
+            --output "$response_path" \
+            --write-out "%{http_code}" \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --request POST \
+            --header "Authorization: Bearer ${AGENTHUB_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data-binary "@${RUNNER_TEMP}/agent-declaration.json" \
+            "${AGENTHUB_API_URL%/}/api/v1/agents/declare")
+
+          cat "$response_path"
+          echo
+          if (( http_status < 200 || http_status >= 300 )); then
+            echo "Agent declaration failed with HTTP ${http_status}" >&2
+            exit 1
+          fi
+
+          echo "Agent declared successfully"

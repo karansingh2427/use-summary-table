@@ -1,0 +1,33 @@
+# Agent Registry declaration manifest.
+#
+# Copy this file into your repository — the root by default, or anywhere else
+# if you point the workflow's MANIFEST_PATH at it.
+# Replace every <placeholder> and delete the optional entries you don't need —
+# the workflow fails if any <...> value reaches the payload, so a field you
+# forget cannot ship silently.
+#
+# Quote every value. Unquoted `version: 1.10` is the number 1.1, not the string
+# "1.10", and unquoted `true` is a boolean — the workflow rejects non-string
+# values rather than guessing what you meant.
+
+# ---------------------------------------------------------------------------
+# Required
+# ---------------------------------------------------------------------------
+
+name: "EPA Use Summary Table Extractor"
+
+description: "Agentic AI application (LLM + human-in-the-loop) that extracts structured, auditable data from published EPA regulatory label documents. \nConverts label PDFs into a 28-column structured schema (149 pages to 155 rows in the benchmark set), with rule-based cell provenance for traceability. \nBenchmarked at 88% field-level accuracy against an expert-vetted gold standard. Remaining gap is in free-text fields requiring human interpretation."
+
+owner_email: "karandeep.singh@bayer.com"
+
+viewing_url: "https://use-summary-table.pages.dev/"
+
+# ---------------------------------------------------------------------------
+# Optional — delete any you don't use
+# ---------------------------------------------------------------------------
+
+owner: "Karandeep Singh"
+
+version: "0.1.0-pilot"
+
+lifecycle_status: "development"
