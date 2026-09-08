@@ -20,7 +20,7 @@ systems — **no reformatting needed**.
 
 ## Solution
 
-A browser-based prototype that extracts **Use Summary Tables** from pesticide label PDFs.
+A browser-based tool that extracts **Use Summary Tables** from pesticide label PDFs.
 Upload one or more labels, click **Run Extraction**, and get a complete, schema-compliant table
 of every crop and every use — rendered on screen and downloadable as Excel (`.xlsx`).
 
@@ -94,7 +94,7 @@ This repo actually holds two independent ways to extract a table, and they don't
 |--------|-------|
 | **Overall Field-Level Precision** | 82% |
 | **Row Recall** | 100% (156/156 rows matched) |
-| **Schema Compliance** | 100% (27/27 columns) |
+| **Schema Compliance** | 100% (28/28 columns) |
 | **Test Set** | 5 pesticide labels, 156 uses |
 
 **Precision by Field (top challenges):**
@@ -470,7 +470,7 @@ Both need the sample label PDFs described in `samples/README.md`.
 - **Heuristic limitations**: Rates embedded in narrative (not tables) or with non-standard abbreviations 
   may not match patterns. Always verify against the source label.
 
-### Prototype Scope
+### Current Scope
 - **Not for regulatory submission**: Output is intended for internal review and analysis. 
   Always compare extracted table against source label before submitting to regulators.
 - **Human verification required**: Confidence scoring and coverage warnings show where to look first, 

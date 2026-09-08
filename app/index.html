@@ -10,16 +10,18 @@
 <script src="vendor/tesseract.min.js" onerror="window.__tesseractLocalMissing = true"></script>
 <style>
   :root {
-    --bg: #f5f7fa;
+    --bg: #f8fafc;
     --panel: #ffffff;
     --ink: #14213d;
     --muted: #667085;
     --line: #e4e8ee;
-    --brand: #1f6feb;
-    --brand-dark: #1550b3;
+    --brand: #4f46e5;
+    --brand-dark: #4338ca;
+    --accent: #14b8a6;
     --ok: #067647;
     --ok-bg: #ecfdf3;
-    --shadow: 0 1px 2px rgba(16,24,40,.05), 0 8px 24px rgba(16,24,40,.06);
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 10px 28px rgba(30,27,75,.08);
+    --shadow-hover: 0 2px 4px rgba(16,24,40,.07), 0 16px 36px rgba(30,27,75,.12);
   }
   * { box-sizing: border-box; }
   body {
@@ -32,28 +34,30 @@
   .wrap { max-width: 1100px; margin: 0 auto; padding: 40px 24px 80px; }
 
   header.hero {
-    background: linear-gradient(135deg, #14213d 0%, #1f3a68 100%);
+    background: linear-gradient(135deg, #1e1b4b 0%, #4338ca 100%);
     color: #fff;
     padding: 48px 24px;
   }
   header.hero .inner { max-width: 1100px; margin: 0 auto; }
   .badge {
     display: inline-block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
-    background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22);
     padding: 4px 10px; border-radius: 999px; margin-bottom: 14px;
   }
   header.hero h1 { margin: 0 0 10px; font-size: 34px; letter-spacing: -.02em; }
   header.hero p { margin: 0; max-width: 720px; color: #c9d6ea; font-size: 16px; }
 
   .card {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
     box-shadow: var(--shadow); padding: 24px; margin-top: 24px;
+    transition: box-shadow .2s, transform .2s;
   }
+  .card:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
   .card h2 { margin: 0 0 4px; font-size: 18px; }
   .card .sub { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
 
   .drop {
-    border: 2px dashed #c3cede; border-radius: 12px; background: #fbfcfe;
+    border: 2px dashed #c3cede; border-radius: 14px; background: #fbfcfe;
     padding: 36px 20px; text-align: center; cursor: pointer; transition: .18s;
   }
   .drop:hover, .drop.over { border-color: var(--brand); background: #f2f7ff; }
@@ -91,9 +95,10 @@
     font: inherit; font-weight: 600; border-radius: 10px; padding: 11px 20px;
     border: 1px solid transparent; cursor: pointer; transition: .15s;
   }
-  .primary { background: var(--brand); color: #fff; }
-  .primary:hover:not(:disabled) { background: var(--brand-dark); }
+  .primary { background: var(--brand); color: #fff; box-shadow: 0 1px 2px rgba(79,70,229,.15); }
+  .primary:hover:not(:disabled) { background: var(--brand-dark); box-shadow: 0 4px 10px rgba(67,56,202,.25); }
   .ghost { background: #fff; color: var(--ink); border-color: var(--line); }
+  .ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   button:disabled { opacity: .5; cursor: not-allowed; }
 
   .status { font-size: 14px; color: var(--muted); }
@@ -211,6 +216,23 @@
   .job-file-status.done { color: var(--ok); }
   .job-file-retry { padding: 6px 12px; font-size: 13px; }
   .qc-defects li { margin-bottom: 4px; }
+
+  .job-history-panel {
+    margin-top: 14px; border: 1px solid var(--line); border-radius: 12px;
+    padding: 4px 16px; font-size: 14px; background: #fbfcfe;
+  }
+  .job-history-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 0; border-bottom: 1px solid var(--line);
+  }
+  .job-history-row {
+    display: flex; align-items: center; gap: 10px; padding: 10px 0;
+    border-bottom: 1px solid var(--line); font-size: 13.5px;
+  }
+  .job-history-row:last-child { border-bottom: none; }
+  .job-history-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+  .job-history-age { flex: 1; color: var(--muted); }
+  .job-history-empty { padding: 14px 0; color: var(--muted); font-size: 13.5px; }
 
   .warnings {
     margin-top: 18px; background: #fffaeb; border: 1px solid #fedf89;
@@ -332,14 +354,17 @@
     font-size: 12.5px; max-height: 260px; overflow: auto; white-space: pre-wrap;
   }
 
-  .search:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(31,111,235,.12); }
+  .search:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
 
   .stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
   .stat {
     background: #f7f9fc; border: 1px solid var(--line); border-radius: 10px;
     padding: 10px 16px; min-width: 110px;
+    box-shadow: 0 1px 2px rgba(16,24,40,.04);
+    transition: box-shadow .15s, transform .15s;
   }
-  .stat b { display: block; font-size: 20px; letter-spacing: -.02em; }
+  .stat:hover { box-shadow: 0 4px 12px rgba(30,27,75,.09); transform: translateY(-1px); }
+  .stat b { display: block; font-size: 20px; letter-spacing: -.02em; color: var(--brand); }
   .stat span { font-size: 12px; color: var(--muted); }
 
   .group { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 18px; overflow: hidden; }
@@ -362,7 +387,7 @@
     max-width: 280px; word-break: break-word;
     line-height: 1.35;
   }
-  /* 27-column schema: long restriction/PPE cells are clamped until hovered,
+  /* 28-column schema: long restriction/PPE cells are clamped until hovered,
      so the table stays scannable without losing any content. */
   tbody td.long { max-width: 320px; }
   tbody td .cell-box { display: block; }
@@ -454,7 +479,7 @@
 
 <header class="hero">
   <div class="inner">
-    <div class="badge">Prototype · Data Extractor</div>
+    <div class="badge">AI-Assisted Data Extractor</div>
     <h1>Use Summary Tables Extractor</h1>
     <p>
       Upload one or more pesticide label PDFs. The extractor reads the entire document and pulls out
@@ -487,11 +512,20 @@
       <button class="primary" id="runBtn" disabled>Run Extraction</button>
       <button class="ghost" id="runBgBtn" disabled title="Submit for AI extraction on the server — close this tab and come back later to the results">Run in background</button>
       <button class="ghost" id="clearBtn" disabled>Clear</button>
+      <button class="ghost small-target" id="jobHistoryBtn" type="button" title="See past background runs and their status">🕓 Job history</button>
       <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.9em">
         <input type="checkbox" id="llmExtractToggle" checked />
         🤖 Extract with AI
       </label>
       <span class="status" id="status" role="status" aria-live="polite">No files selected.</span>
+    </div>
+
+    <div class="job-history-panel" id="jobHistoryPanel" role="region" aria-label="Job history" style="display:none">
+      <div class="job-history-head">
+        <strong>Job history</strong>
+        <button class="ghost small-target" id="jobHistoryClearBtn" type="button">Clear history</button>
+      </div>
+      <div id="jobHistoryList"></div>
     </div>
 
     <!-- AI extraction — reads label prose and reasons through the same
@@ -589,7 +623,7 @@
     </div>
   </section>
 
-  <footer>Use Summary Tables Extractor · prototype build</footer>
+  <footer>Use Summary Tables Extractor</footer>
 </main>
 
 <script>
@@ -653,7 +687,7 @@ const EXTRACTION_RULES_MD = "# Extraction Rules — Distilled from Training Logs
 const DERIVATION_RULES_MD = "# Derivation Rules — analyst-derived columns\n\nThree UST columns are almost never printed on a label as a literal string, yet the golden\nexamples always have them filled:\n\n- **Use Site** — `Agricultural (Outdoor)`\n- **App. Type** — `Broadcast`, `Chemigation, Injection, In-furrow spray, Drench`, …\n- **App. Timing (Site Status)** — `Post-emergence`, `At-planting / Post-transplant`, …\n\nAn analyst fills these by reading the application prose and applying a settled convention.\nThat convention is written out here so the tool can apply it too — **reviewable and traceable,\nnot guessed**.\n\n## Why this does not break R19\n\nR19 says the tool must never invent facts. These rules do not invent anything: each one fires\nonly on **evidence found in the label text**, and each derived value is recorded so a reviewer\ncan see *which* phrase triggered it. A rule with no matching evidence does not fire, and the\ncolumn stays `NS`.\n\nThe distinction that matters:\n\n| Not allowed | Allowed |\n|---|---|\n| Assuming a PHI of 7 because similar products use 7 | Reading \"Broadcast\" from the phrase \"apply as a broadcast spray\" |\n| Filling `Use Site` because most labels are agricultural | Filling `Use Site` because the label says \"not for use in greenhouses\" |\n| Copying a rate from another product | Converting a stated rate with a stated concentration |\n\nEvery rule below cites the evidence it requires. No rule fires on absence of evidence alone,\nwith the single documented exception of D3 (see its note).\n\n---\n\n## D1 · Use Site\n\n| # | Evidence in the label | Value |\n|---|---|---|\n| D1.1 | Section heading contains `PLANTHOUSE` | `Planthouse` |\n| D1.2 | Block names a greenhouse use (`in greenhouses`, `greenhouse-grown`) | `Greenhouse (Indoor)` |\n| D1.3 | Block names lawns, homes, ornamental beds around residences | `Residential (Outdoor)` |\n| D1.4 | Block states an outdoor field application — a per-acre rate (`fl oz/A`, `Gallons/Acre`), aerial application, or ground boom equipment | `Agricultural (Outdoor)` |\n\nD1.4 is evidence-based: a per-acre rate with aircraft or ground-boom equipment is an outdoor\nfield use. A label with none of these leaves `Use Site` as `NS`.\n\n## D2 · App. Type\n\nDriven by `App. Target` plus the delivery words present in the block. Several may apply, and\nthe golden example lists them comma-separated in the label's own order.\n\n| # | App. Target | Evidence | Value contributed |\n|---|---|---|---|\n| D2.1 | Foliar | `broadcast`, or a foliar spray applied over the whole field by ground boom or aircraft | `Broadcast` |\n| D2.2 | Foliar | `banded`, `band application` | `Banded` |\n| D2.3 | Foliar | `directed spray` / `shielded spray`, stated inside **this crop's own section** (R-23) | `Directed Spray` / `Shielded Spray` |\n| D2.4 | Soil | `chemigation`, `drip`, `trickle`, `micro-sprinkler` | `Chemigation` |\n| D2.5 | Soil | `injection`, `inject below the seed line` | `Injection` |\n| D2.6 | Soil | `in-furrow` | `In-furrow spray` |\n| D2.7 | Soil | `drench`, `potting hole drench`, `post-transplant drench` | `Drench` |\n| D2.8 | Soil | `side-dress` | `Side-dress` |\n| D2.9 | Seed Treatment | any | `Seed Treatment` |\n\nIf none match, `App. Type` stays `NS`.\n\nD2.3 is the rule most often mis-triggered by a shared, non-crop-specific paragraph — a\nproduct-wide sentence naming \"directed spray\" can read as applicable to every crop even\nwhen a given crop's own section states a different method (e.g. its own rate table says\n\"broadcast acre\"). Confirm the evidence sits inside the crop's own section before applying\nD2.3, per R-23.\n\n**A shared sentence can still add a value, even under D2.3's own-section check.** R-23's\n\"own section wins\" test is for *contradicting* evidence, not for a shared sentence that\nstates an *additional*, non-conflicting method the crop's own section never rules out. Per\nR-20, when the label offers a choice of methods (e.g. \"broadcast treatment or as a banded\ntreatment\"), carry every option it names — `Broadcast or Band`, not just whichever one\nhappens to appear in the crop's own section. Do not let the D2.3/R-23 own-section check be\nread as a reason to stop at one value when a shared sentence supplies another that the\nlabel itself offers as an alternative.\n\n## D3 · App. Timing (Site Status)\n\n| # | Evidence | Value |\n|---|---|---|\n| D3.1 | `pre-emergence` and `post-emergence` both present | `Pre-emergence/ Post-emergence` |\n| D3.2 | `pre-emergence` / `pre-emergent` alone | `Pre-emergence` |\n| D3.3 | `post-emergence` / `post-emergent` alone | `Post-emergence` |\n| D3.4 | `at-planting`, `at planting`, `prior to planting` | `At-planting` |\n| D3.5 | `at transplant`, `post-transplant`, `potting hole` | `Post-transplant` |\n| D3.6 | D3.4 and D3.5 both present | `At-planting / Post-transplant` |\n| D3.8 | *withdrawn — see below* | — |\n| D3.7 | Foliar target, and no other timing evidence in the block | `Post-emergence` |\n| D3.9 | Soil placement wording implying a standing plant: `basal drench`, `drip line`, `tree canopy`, `trunk` | `Post-emergence` |\n\n**D3.8 was withdrawn.** It returned `Pre-transplant` from plant-house wording. The repository\ngolden supports that; the analyst's pasted golden records `Post-emergence` on the same rows. Two\nreference files disagree, so the rule had no evidence behind it — only a choice of source — and\nit is out of the code until the authoritative golden is settled (Task 46).\n\n**D3.10 — `App. Timing (other)` default.** Where neither the use block nor the label's\nproduct-wide directions state any timing phrase, the column is filled with `When pests occur`\nand marked derived. This is a **house convention, not a reading of the label.** It is applied\nlast, after block wording and after the product-wide sentence, and never overwrites a filled cell.\n\nIt is marked derived precisely because R19 would otherwise be broken: an unmarked cell claims to\nbe label text. Anyone reviewing the output must be able to tell a printed phrase from a default,\nso **if the derived marking is ever dropped from this rule, the rule must be dropped with it.**\n\nNote on the evidence for this rule. It was first written on the basis that the golden varies the\nwording per row, which made a default look risky. That was read from\n`golden_example_SIVANTO_400_SL.txt`. The analyst's pasted golden\n(`golden_example_SIVANTO_400_SL_analyst_paste.txt`) carries `When pests occur` on **every** row,\nwhich supports the default far more strongly. The two files disagree; the rule is defensible\nunder either, but the reasoning recorded for it should not be trusted until Task 46 resolves\nwhich file is authoritative.\n\n**Order matters within `deriveTimingStatus()`.** D3.1–D3.3 read the explicit words first, the\nplanting/transplant pair next, then the situational rules D3.9 and D3.7 last, so a stated phrase\nalways beats an inference. When D3.8 was briefly present it had to be tested *before* D3.4–D3.6,\nbecause a plant-house block narrates the whole sequence — apply \"prior to transplanting\", then a\nfield application \"following transplanting\" — and the generic transplant pattern matches it too.\nThat interaction is recorded here in case D3.8 is ever reinstated.\n\n**Note on D3.7 and D3.9.** These two reason from the situation rather than a phrase.\nA foliar spray onto a standing crop is by definition post-emergence; so is a soil treatment\nplaced at the base of a trunk or between the trunk and the drip line of a canopy, because\nneither is possible unless the crop is up. D3.7's evidence is that the label files the use\nunder a FOLIAR heading; D3.9's is the placement wording. Perennial-crop soil blocks (citrus,\nstone fruit, vine) never print the word \"post-emergence\", yet the golden records it for them.\n\nD3.7 formerly also required pest-driven wording in the block. That extra condition was not\nload-bearing, and it broke the column: SIVANTO states its pest timing once in the general\ndirections instead of repeating it per use, so the rule fired on 1 row of 43 while the golden\nrecords `Post-emergence` on every foliar row. Removed. All three are listed separately here so\na reviewer can disable them if the convention changes.\n\n---\n\n## D4 · Max # Apps (derived when the count is not stated explicitly)\n\nSome labels state a per-application rate range and a total cap (per crop cycle and/or per\nyear) but never state an explicit maximum number of applications anywhere in the document.\nReading straight for the phrase and finding nothing is not the end of the analysis — the\ncount is implied by the other two numbers the label *does* state, the same way D3.10\nderives a timing default from house convention rather than label wording.\n\n| # | Evidence | Value |\n|---|---|---|\n| D4.1 | A total cap (per crop cycle or per year) and a minimum per-application rate are both stated, but no explicit application count appears anywhere in the label | `floor(total cap ÷ minimum per-application rate)`, marked derived |\n\nCross-check the result against any stated minimum retreatment interval (MRI) where one is\ngiven — a derived count that would require applications closer together than the MRI\nallows signals a misread cap or rate rather than a valid derivation, and the column should\nrevert to `NS` rather than report an inconsistent number.\n\n**This is a derived convention, not a reading of the label**, exactly as D3.10 is for\n`App. Timing (other)`. Mark the cell as derived so a reviewer can distinguish it from a\nverbatim application count, and follow schema-reference.md's Rule 5.1 cascade (§ Max No.\nof CC/yr) once `Max No. of CC/yr` is known — do not derive a `Max # Apps` count for a\nperiod the label never caps at all.\n\n---\n\n## Reviewing derived values\n\nEvery value these rules produce is logged in the run log under the row it belongs to, naming\nthe rule that fired. Anything a rule did not cover stays `NS`. If a derived value looks wrong,\nthe fix belongs in this file first, then in `deriveColumns()` in `app/index.html`.\n";
 
 /** Verbatim copy of knowledge/schema-reference.md (Priority 4 source) — the
- *  full 27-column definition table, the Max No. of CC/yr Rule 5.1 decision
+ *  full 28-column definition table, the Max No. of CC/yr Rule 5.1 decision
  *  procedure, the row-uniqueness-key statement (Source File + Use + Use Site
  *  + App. Target + App. Type should not repeat within a label — directly
  *  relevant to R-16's row-duplication defect), and the Common Defects QC
@@ -756,28 +790,101 @@ function renderTestModeBanner() {
 
 renderTestModeBanner();
 
-// Background jobs — "your last run" banner. showNotice() only ever writes
-// textContent (no HTML), so this small dedicated element handles the one
-// case that needs a clickable link.
+// Background jobs — "your last run" banner + job history. showNotice() only
+// ever writes textContent (no HTML), so this small dedicated element handles
+// the one case that needs a clickable link.
 const runBgBtn = document.getElementById("runBgBtn");
 const lastJobBannerEl   = document.getElementById("lastJobBanner");
 const lastJobBannerText = document.getElementById("lastJobBannerText");
+const jobHistoryBtn     = document.getElementById("jobHistoryBtn");
+const jobHistoryPanel   = document.getElementById("jobHistoryPanel");
+const jobHistoryList    = document.getElementById("jobHistoryList");
+const jobHistoryClearBtn = document.getElementById("jobHistoryClearBtn");
+
+// Stored as localStorage["jobHistory"]: [{ id, submittedAt }, ...] newest
+// first, capped at JOB_HISTORY_MAX. Replaces the older single "lastJobId"
+// string key (migrated below) so a history panel has something to list, and
+// so the "may still be processing" banner can check the job's age instead of
+// showing forever once any job has ever been submitted.
+const JOB_HISTORY_KEY = "jobHistory";
+const JOB_HISTORY_MAX = 10;
+const JOB_BANNER_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+function loadJobHistory() {
+  try { return JSON.parse(localStorage.getItem(JOB_HISTORY_KEY)) || []; }
+  catch { return []; }
+}
+
+function saveJobHistory(history) {
+  localStorage.setItem(JOB_HISTORY_KEY, JSON.stringify(history.slice(0, JOB_HISTORY_MAX)));
+}
+
+function recordJobSubmission(jobId) {
+  const history = loadJobHistory().filter(j => j.id !== jobId);
+  history.unshift({ id: jobId, submittedAt: Date.now() });
+  saveJobHistory(history);
+}
+
+(function migrateLegacyLastJobId() {
+  const legacy = localStorage.getItem("lastJobId");
+  if (!legacy) return;
+  if (!loadJobHistory().some(j => j.id === legacy)) recordJobSubmission(legacy);
+  localStorage.removeItem("lastJobId");
+})();
+
+function formatJobAge(submittedAt) {
+  const ms = Date.now() - submittedAt;
+  const mins = Math.round(ms / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
 
 function renderLastJobBanner() {
   if (new URLSearchParams(window.location.search).get("job")) {
     lastJobBannerEl.style.display = "none";
     return;
   }
-  const lastJobId = localStorage.getItem("lastJobId");
-  if (!lastJobId) {
+  const [latest] = loadJobHistory();
+  if (!latest || Date.now() - latest.submittedAt > JOB_BANNER_MAX_AGE_MS) {
     lastJobBannerEl.style.display = "none";
     return;
   }
   lastJobBannerText.innerHTML =
-    `Your last background run (<code>${esc(lastJobId)}</code>) may still be processing — `
-    + `<a href="?job=${encodeURIComponent(lastJobId)}">view its status</a>.`;
+    `Your last background run (<code>${esc(latest.id)}</code>) may still be processing — `
+    + `<a href="?job=${encodeURIComponent(latest.id)}">view its status</a>.`;
   lastJobBannerEl.style.display = "flex";
 }
+
+function renderJobHistoryPanel() {
+  const history = loadJobHistory();
+  if (!history.length) {
+    jobHistoryList.innerHTML = `<div class="job-history-empty">No background runs yet.</div>`;
+    return;
+  }
+  jobHistoryList.innerHTML = history.map(j => (
+    `<div class="job-history-row">`
+    + `<span class="job-history-id"><code>${esc(j.id)}</code></span>`
+    + `<span class="job-history-age">${esc(formatJobAge(j.submittedAt))}</span>`
+    + `<a href="?job=${encodeURIComponent(j.id)}">View</a>`
+    + `</div>`
+  )).join("");
+}
+
+jobHistoryBtn.addEventListener("click", () => {
+  const opening = jobHistoryPanel.style.display === "none";
+  if (opening) renderJobHistoryPanel();
+  jobHistoryPanel.style.display = opening ? "block" : "none";
+});
+
+jobHistoryClearBtn.addEventListener("click", () => {
+  localStorage.removeItem(JOB_HISTORY_KEY);
+  renderJobHistoryPanel();
+  renderLastJobBanner();
+});
 
 // R19 — active-ingredient confirmation
 const aiPicker     = document.getElementById("aiPicker");
@@ -5005,7 +5112,7 @@ async function submitBackgroundJob(documents, totalPages, selectedAi) {
     return;
   }
 
-  localStorage.setItem("lastJobId", jobId);
+  recordJobSubmission(jobId);
   const url = new URL(window.location.href);
   url.searchParams.set("job", jobId);
   window.history.pushState({}, "", url);
