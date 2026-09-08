@@ -524,7 +524,7 @@
   <!-- Step 2: Schema -->
   <section class="card">
     <h2>2 · Output schema</h2>
-    <p class="sub">Every extracted row conforms to these 27 columns, in this exact order. Values the label does not state are written as <b>NS</b>; columns that do not apply read <b>NA</b> — never left blank.</p>
+    <p class="sub">Every extracted row conforms to these 28 columns, in this exact order. Values the label does not state are written as <b>NS</b>; columns that do not apply read <b>NA</b> — never left blank.</p>
     <div class="schema-grid" id="schemaGrid"></div>
   </section>
 
@@ -3588,34 +3588,19 @@ groupsEl.addEventListener("keydown", e => {
 searchEl.addEventListener("input", e => renderTable(e.target.value));
 confFilterEl.addEventListener("change", () => renderTable(searchEl.value));
 
-/**
- * Strips internal fields so exports contain only real data.
- *
- * R24 — a derived value must stay distinguishable from one read verbatim off
- * the label. On screen that is the ◆ marker; in a spreadsheet there are no
- * tooltips, so the provenance is written into its own column. Without this a
- * reviewer cannot tell `Agricultural (Outdoor)` (convention) from `264-1198`
- * (printed on the label), which is the whole point of R19.
- */
-const DERIVED_COLUMN = "Derived Fields";
-
-function derivedSummary(row) {
-  const entries = Object.entries(row.__derived || {});
-  if (!entries.length) return "None — all values read from the label";
-  return entries.map(([col, ruleId]) => `${col} (${ruleId})`).join("; ");
-}
-
+/** Strips internal/review-only fields so exports contain only the 28 schema columns. */
 function exportRows(rows) {
   return rows.map(r => {
     const out = {};
-    ["Source File", ...DISPLAY_COLUMNS].forEach(c => { out[c] = r[c]; });
-    out[DERIVED_COLUMN] = derivedSummary(r);
+    SCHEMA.forEach(c => { out[c] = r[c]; });
     return out;
   });
 }
 
-/** Export column order. Not part of SCHEMA — the 27 columns stay fixed. */
-const EXPORT_COLUMNS = ["Source File", ...DISPLAY_COLUMNS, DERIVED_COLUMN];
+/** Export column order — exactly the 28 SCHEMA columns. Source File, Page,
+ *  Confidence, and Derived Fields stay review-only (on-screen table), not
+ *  part of the exported spreadsheet. */
+const EXPORT_COLUMNS = [...SCHEMA];
 
 /** Columns for the informational "QC Notes" sheet — the independent LLM QC
     agent's findings (extractWithLLM's QC/remediation stages), not a gate. */
@@ -3669,10 +3654,6 @@ const EXCEL_STYLE = {
   baseFont: { name: "Calibri", sz: 10, color: { rgb: "FF1F2937" } },
   altFill: { patternType: "solid", fgColor: { rgb: "FFF8FBFF" } },
   nsFill: { patternType: "solid", fgColor: { rgb: "FFF2F4F7" } },
-  highFill: { patternType: "solid", fgColor: { rgb: "FFD1FADF" } },
-  mediumFill: { patternType: "solid", fgColor: { rgb: "FFFEF0C7" } },
-  lowFill: { patternType: "solid", fgColor: { rgb: "FFFEE4E2" } },
-  derivedFill: { patternType: "solid", fgColor: { rgb: "FFFFF4DB" } },
   productFills: [
     { base: { patternType: "solid", fgColor: { rgb: "FFEFF6FF" } }, strong: { patternType: "solid", fgColor: { rgb: "FFDCEBFF" } } },
     { base: { patternType: "solid", fgColor: { rgb: "FFF2FAF0" } }, strong: { patternType: "solid", fgColor: { rgb: "FFDEEFDB" } } },
@@ -3691,9 +3672,6 @@ function colWidthFromText(value) {
 function applyExportSheetStyle(ws, rows) {
   if (!ws || !ws["!ref"]) return;
   const range = XLSX.utils.decode_range(ws["!ref"]);
-  const confidenceCol = EXPORT_COLUMNS.indexOf("Confidence");
-  const derivedCol = EXPORT_COLUMNS.indexOf(DERIVED_COLUMN);
-  const sourceFileCol = EXPORT_COLUMNS.indexOf("Source File");
   const productCol = EXPORT_COLUMNS.indexOf("Product Name (PBN)");
   const productFillByName = new Map();
   let paletteIdx = 0;
@@ -3752,20 +3730,14 @@ function applyExportSheetStyle(ws, rows) {
 
       if (value === NOT_SPECIFIED || value === NOT_APPLICABLE) {
         fill = EXCEL_STYLE.nsFill;
-      } else if (c === confidenceCol) {
-        if (value === "High") fill = EXCEL_STYLE.highFill;
-        else if (value === "Medium") fill = EXCEL_STYLE.mediumFill;
-        else if (value === "Low") fill = EXCEL_STYLE.lowFill;
-      } else if (c === derivedCol && value && !/^None\b/.test(value)) {
-        fill = EXCEL_STYLE.derivedFill;
-      } else if (c === sourceFileCol || c === productCol) {
+      } else if (c === productCol) {
         fill = productPalette.strong;
       }
 
       cell.s = {
         font: {
           ...EXCEL_STYLE.baseFont,
-          bold: c === sourceFileCol || c === productCol,
+          bold: c === productCol,
           italic: value === NOT_SPECIFIED || value === NOT_APPLICABLE
         },
         fill,
@@ -3776,7 +3748,7 @@ function applyExportSheetStyle(ws, rows) {
           left: EXCEL_STYLE.border
         },
         alignment: {
-          horizontal: c === confidenceCol ? "center" : "left",
+          horizontal: "left",
           vertical: "top",
           wrapText: true
         }
